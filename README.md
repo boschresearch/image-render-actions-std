@@ -1,6 +1,10 @@
 # Image-Render Standard Actions
 
+**Check out the `stable` branch for the latest stable version**
+
 Standard actions for the `image-render` automation system.
+
+See the repository `image-render-setup` for more information and documentation on the `image-render` automation system.
 
 ## Purpose of the project
 
