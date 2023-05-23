@@ -51,7 +51,6 @@ import catharsys.util.path as cathpath
 
 ################################################################################
 class CConstructLabel:
-
     ################################################################################
     def __init__(self):
         pass
@@ -262,7 +261,6 @@ class CConstructLabel:
         ###################################################################
         # Loop over frames
         while iTrgFrame <= self.iFrameLast:
-
             print("")
             print("Start processing frame {0}...".format(iTrgFrame), flush=True)
 
@@ -482,7 +480,6 @@ class CConstructLabel:
 
     ################################################################################
     def _ConstructRegExFromWildcards(self, _lWildcards):
-
         # Construct regular expressions from box types
         lRegEx = []
         for sWildcard in _lWildcards:
@@ -505,7 +502,6 @@ class CConstructLabel:
 
     ###################################################################################
     def _ReadLabelConfig(self, _iTrgFrame):
-
         from anybase import config
 
         # Read label config file
@@ -631,7 +627,6 @@ class CConstructLabel:
 
     ################################################################################
     def _GetSkeletonBones(self, _dicSkel):
-
         dicBones = {}
         for sBone in _dicSkel:
             dicChildBones = _dicSkel.get(sBone)
@@ -650,7 +645,6 @@ class CConstructLabel:
     ################################################################################
     # Pre-process skeleton types for easier processing later on
     def _ProcessSkeletonTypes(self, _dicSkelTypes):
-
         if _dicSkelTypes is None:
             return {}
         # endif
@@ -675,7 +669,6 @@ class CConstructLabel:
     ###################################################################
     # Convert raw label image to SemSeg label id image and preview image
     def _ProcessImgRawSemSeg(self, *, iTrgFrame, dicFrameLabelSemSeg):
-
         xTrgType = dicFrameLabelSemSeg.get("xTrgType")
         xTrgTypeInfo = np.iinfo(xTrgType)
         iTotalNormValue = dicFrameLabelSemSeg.get("iTotalNormValue")
@@ -831,7 +824,6 @@ class CConstructLabel:
 
     ################################################################################
     def _ProcessSkeletons(self, *, xView, imgTrgPreview, imgTrgLabel, dicFrameLabelSemSeg, dicCLT):
-
         # Get Skeleton Types
         dicSkel = None
         dicProcess = dicCLT.get("mProcess")
@@ -853,6 +845,8 @@ class CConstructLabel:
         iPreviewJointRadius = dicPreview.get("iJointRadius", 5)
         iPreviewLineWidth = dicPreview.get("iLineWidth", 2)
 
+        iTrgRowCnt, iTrgColCnt, iTrgChCnt = imgTrgLabel.shape
+
         # Loop over all label types
         for dicFlatType in dicFrameLabelSemSeg.get("lFlatTypes"):
             # sTypeId = dicFlatType.get("sId")
@@ -869,7 +863,6 @@ class CConstructLabel:
                 # Process pose skeletons, if any
                 dicPoses3d = dicInst.get("mPoses3d")
                 if dicPoses3d is not None:
-
                     for sPoseId in dicPoses3d:
                         dicPose = dicPoses3d.get(sPoseId)
                         dicBones = dicPose.get("mBones")
@@ -895,13 +888,14 @@ class CConstructLabel:
                                 lIsOccluded = []
                                 lIsSelfOcc = []
                                 for aPnt2d_pix, bInFront in zip(lPnts2d_pix, lInFront):
-                                    if not bInFront:
+                                    iR = int(round(aPnt2d_pix[1]))
+                                    iC = int(round(aPnt2d_pix[0]))
+
+                                    if not bInFront or iR < 0 or iR >= iTrgRowCnt or iC < 0 or iC >= iTrgColCnt:
                                         lIsOccluded.append(True)
                                         lIsSelfOcc.append(None)
                                         continue
                                     # endif
-                                    iR = int(round(aPnt2d_pix[1]))
-                                    iC = int(round(aPnt2d_pix[0]))
 
                                     iTypeAtPix = int(imgTrgLabel[iR, iC, self.iTrgChType])
                                     iInstAtPix = int(imgTrgLabel[iR, iC, self.iTrgChInst])
@@ -1061,7 +1055,6 @@ class CConstructLabel:
     ################################################################################
     # Process 3d
     def _ProcessIdealInstanceBoxes2d(self, *, imgTrgPreview, dicFrameLabelSemSeg, dicCLT):
-
         print("Processing ideal 2d boxes...", flush=True)
 
         dicIdealBox2d: dict = None
@@ -1137,7 +1130,6 @@ class CConstructLabel:
     ################################################################################
     # Project 3d label data to image, if projection for active camera is supported
     def _ProjectLabelDataToImage(self, *, xView, imgTrgPreview, dicFrameLabelSemSeg, dicCLT):
-
         print("Projecting 3d label data to image...", flush=True)
         if xView is None:
             print(">> Active camera not supported for projection")
@@ -1201,7 +1193,6 @@ class CConstructLabel:
                 # Process 3d Boxes, if any
                 dicBox3d = dicInst.get("mBox3d")
                 if dicBox3d is not None and self._IsOfType(sTypeId, lReBox3dEvalTypes):
-
                     aCtr = np.array(dicBox3d.get("lCenter"))
                     aSize = np.array(dicBox3d.get("lSize"))
                     aAxes = np.array(dicBox3d.get("lAxes"))
@@ -1237,7 +1228,6 @@ class CConstructLabel:
                             aCamPnts = xView.PointsToCameraFrame(aPnts)
                             # Test whether box plane is visible
                             if np.all(np.dot(aCamPnts, aCamNorm) < 0):
-
                                 lPnts2d_pix, lInFront = xView.ProjectToImage(aPnts)
                                 if all(lInFront):
                                     sSide = lSides[iSideIdx]
@@ -1276,7 +1266,6 @@ class CConstructLabel:
                 # Process vertex groups, if any
                 dicVexGroups = dicInst.get("mVertexGroups")
                 if dicVexGroups is not None and self._IsOfType(sTypeId, lReVexGrpEvalTypes):
-
                     for sVgLabelType in dicVexGroups:
                         dicVgType = dicVexGroups.get(sVgLabelType)
                         for sVgInst in dicVgType:
@@ -1314,7 +1303,6 @@ class CConstructLabel:
     ################################################################################
     # Find 2d-boxes for instances per type
     def _FindSemSegInstanceBoxes2d(self, *, imgTrgPreview, imgTrgLabel, dicFrameLabelSemSeg, dicCLT):
-
         dicBox2d = None
         dicProcess = dicCLT.get("mProcess")
         if dicProcess is not None:
@@ -1427,7 +1415,6 @@ class CConstructLabel:
     ################################################################################
     # Skeletonize SemSeg areas for selected types (slow process)
     def _SkeletonizeSemSeg(self, *, imgTrgPreview, imgTrgLabel, dicFrameLabelSemSeg, dicCLT):
-
         # sPathImgDbg = self.dicTrgImgType.get("debug").get("sPathImgTrg")
 
         dicSkel = None
@@ -1526,7 +1513,6 @@ class CConstructLabel:
                     lSegCols = dicSkelLine.get("lSegCols")
 
                     for iIdx in range(len(lSegRows)):
-
                         aRows = lSegRows[iIdx]
                         aCols = lSegCols[iIdx]
 
@@ -1547,7 +1533,6 @@ class CConstructLabel:
 
     ###############################################################################
     def SkelImage(self, _imgSrc):
-
         try:
             from skimage.morphology import (
                 skeletonize,
