@@ -973,12 +973,20 @@ class CConstructLabel:
                             for dicBones in lPreviewBones:
                                 for sBone in dicBones:
                                     dicBone = dicBones.get(sBone)
-                                    lHead = dicBone["mImage"]["lHead"]
+                                    dicBoneImage = dicBone.get("mImage")
+                                    if dicBoneImage is None:
+                                        print(
+                                            f"WARNING: Bone '{sBone}' has no projection to the image. No preview will be generated."
+                                        )
+                                        continue
+                                    # endif
+
+                                    lHead = dicBoneImage.get("lHead")
                                     if lHead is None:
                                         continue
                                     # endif
-                                    bHeadOccluded = dicBone["mImage"]["bHeadOccluded"]
-                                    bHeadSelfOcc = dicBone["mImage"]["bHeadSelfOcc"]
+                                    bHeadOccluded = dicBoneImage["bHeadOccluded"]
+                                    bHeadSelfOcc = dicBoneImage["bHeadSelfOcc"]
 
                                     iThickness = -1
                                     if bHeadOccluded is True or bHeadSelfOcc is True:
@@ -1005,12 +1013,20 @@ class CConstructLabel:
 
                                     for sChild in dicBone.get("lChildren"):
                                         dicChild = dicBones.get(sChild)
-                                        lTail = dicChild["mImage"]["lHead"]
+                                        dicChildImage = dicChild.get("mImage")
+                                        if dicChildImage is None:
+                                            print(
+                                                f"WARNING: Child-bone '{sChild}' of bone '{sBone}' has no projection to the image. No preview will be generated."
+                                            )
+                                            continue
+                                        # endif
+
+                                        lTail = dicChildImage.get("lHead")
                                         if lTail is None:
                                             continue
                                         # endif
-                                        bTailOccluded = dicChild["mImage"]["bHeadOccluded"]
-                                        bTailSelfOcc = dicChild["mImage"]["bHeadSelfOcc"]
+                                        bTailOccluded = dicChildImage["bHeadOccluded"]
+                                        bTailSelfOcc = dicChildImage["bHeadSelfOcc"]
                                         bBoneOccluded = (
                                             bTailOccluded is True
                                             or bHeadOccluded is True
