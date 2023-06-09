@@ -47,6 +47,7 @@ from anybase import path as anypath
 from anybase import assertion, convert, debug, config
 from anybase.cls_any_error import CAnyError, CAnyError_Message, CAnyError_TaskMessage
 
+from catharsys.config.cls_exec_lsf import CConfigExecLsf
 from .config.cls_python import CPythonConfig
 from .config.cls_exec_python import CConfigExecPython
 
@@ -56,10 +57,10 @@ from catharsys.util.cls_entrypoint_information import CEntrypointInformation
 from catharsys.action.cmd.ws_launch import NsKeys as NsLaunchKeys
 from catharsys.decs.decorator_log import logFunctionCall
 
+
 #########################################################################################################
 @EntryPoint(CEntrypointInformation.EEntryType.EXE_PLUGIN)
 def StartJob(*, xPrjCfg: CProjectConfig, dicExec: dict, dicArgs: dict):
-
     try:
         try:
             pathJobConfig = dicArgs["pathJobConfig"]
@@ -76,6 +77,7 @@ def StartJob(*, xPrjCfg: CProjectConfig, dicExec: dict, dicArgs: dict):
         # endif
 
         xExec = CConfigExecPython(dicExec)
+        xLsf = CConfigExecLsf(dicExec)
         xPythonCfg = CPythonConfig(xPythonPath=xExec.pathPython, sCondaEnv=xExec.sCondaEnv)
 
         # xPythonCfg.ExecPython(lArgs=["--version"], bDoPrint=True, bDoPrintOnError=True)
@@ -93,12 +95,7 @@ def StartJob(*, xPrjCfg: CProjectConfig, dicExec: dict, dicArgs: dict):
                 pathJobConfig=pathJobConfig,
                 sJobName=sJobName,
                 sJobNameLong=sJobNameLong,
-                iJobMaxTime=xExec.iJobMaxTime,
-                iJobMemReqGb=xExec.iJobMemReqGb,
-                sJobQueue=xExec.sJobQueue,
-                lModules=xExec.lModules,
-                iGpuCores=xExec.iJobGpuCores,
-                bIsLsbGpuNewSyntax=xExec.bIsLsbGpuNewSyntax,
+                xLsfCfg=xLsf,
                 bPrintOutput=True,
             )
         else:
@@ -130,7 +127,6 @@ def StartJob(*, xPrjCfg: CProjectConfig, dicExec: dict, dicArgs: dict):
 def _StartPythonScript(
     *, xPythonCfg: CPythonConfig, pathJobConfig: Path, bPrintOutput: bool = True, dicDebug: dict = None
 ):
-
     xScript = res.files(catharsys.plugins.std).joinpath("scripts").joinpath("run-action.py")
     with res.as_file(xScript) as pathScript:
         lScriptArgs = [pathScript.as_posix(), "--", pathJobConfig.as_posix()]
@@ -207,15 +203,9 @@ def _LsfStartPythonScript(
     pathJobConfig: Path,
     sJobName: str,
     sJobNameLong: str,
-    sJobQueue: str,
-    iJobMaxTime: int,
-    iJobMemReqGb: int,
-    lModules: list[str],
-    iGpuCores: int,
-    bIsLsbGpuNewSyntax: bool,
+    xLsfCfg: CConfigExecLsf,
     bPrintOutput: bool = True,
 ):
-
     # Only supported on Linux platforms
     if platform.system() != "Linux":
         raise CAnyError_Message(sMsg="Unsupported system '{}' for LSF job creation".format(platform.system()))
@@ -235,66 +225,6 @@ def _LsfStartPythonScript(
         # endif
     # endif
 
-    sLoadModules = " "
-    if len(lModules) > 0:
-        sLoadModules = "module load {0}".format(" ".join(lModules))
-    # endif
-
-    if iJobMemReqGb == 0:
-        sSetMemReq = ""
-    else:
-        sSetMemReq = "#BSUB -M {}G".format(iJobMemReqGb)
-    # endif
-
-    if iGpuCores > 0:
-        if bIsLsbGpuNewSyntax is False:
-            sSetGpuCount = '#BSUB -R "rusage[ngpus_excl_p={0}]"'.format(iGpuCores)
-        else:
-            sSetGpuCount = '#BSUB -gpu "num={0}/task:mode=exclusive_process"'.format(iGpuCores)
-        # endif
-    else:
-        sSetGpuCount = ""
-    # endif
-
-    if sJobQueue is None:
-        sSetJobQueue = ""
-    else:
-        sSetJobQueue = "#BSUB -q {}".format(sJobQueue)
-    # endif
-
-    sBsub = """
-        #BSUB -J $sJobName
-        #BSUB -W $iJobMaxTime
-        #BSUB -o lsf/%J/stdout.txt
-        #BSUB -e lsf/%J/stderr.txt
-        $sSetJobQueue
-
-        # # Blender 2.79b cannot compile the CUDA kernels on RTX
-        # #BSUB -m pascal
-        $sSetGpuCount
-        $sSetMemReq
-
-        mkdir lsf
-        mkdir lsf/$LSB_BATCH_JID
-
-        module purge
-        $sLoadModules
-
-        # Enable blender either by loading the corresponding module
-        # or by setting a path to a Blender install.
-        $sSetCondaEnv
-        $sSetPythonPath
-
-        echo
-        echo "Starting Standard rendering jobs..."
-        echo
-
-        echo "Script = $sScript"
-        echo "Pars = $sPars"
-
-        python $sScript -- $sPars
-    """
-
     ##################################################################################
     # Copy execution script to permament place from resources
     pathCathScripts = anypath.MakeNormPath("~/.catharsys/{}/scripts".format(cathversion.MajorMinorAsString()))
@@ -313,23 +243,32 @@ def _LsfStartPythonScript(
     # endif
 
     sScriptPars = " ".join(lArgs)
+    sScriptFile = pathScript.as_posix()
 
-    sB = (
-        sBsub.replace("$sJobName", sJobName)
-        .replace("$iJobMaxTime", str(iJobMaxTime))
-        .replace("$sSetJobQueue", sSetJobQueue)
-        .replace("$sSetMemReq", sSetMemReq)
-        .replace("$sSetCondaEnv", sSetCondaEnv)
-        .replace("$sSetPythonPath", sSetPythonPath)
-        .replace("$sLoadModules", sLoadModules)
-        .replace("$sSetGpuCount", sSetGpuCount)
-        .replace("$sScript", pathScript.as_posix())
-        .replace("$sPars", sScriptPars)
-    )
+    sScript = f"""
+        mkdir lsf
+        mkdir lsf/$LSB_BATCH_JID
+
+                # Enable python either by loading the corresponding module
+        # or by setting a path to a python install.
+        {sSetCondaEnv}
+        {sSetPythonPath}
+
+        echo
+        echo "Starting Standard rendering jobs..."
+        echo
+
+        echo "Script = {sScriptFile}"
+        echo "Pars = {sScriptPars}"
+
+        python {sScriptFile} -- {sScriptPars}
+    """
 
     print("Submitting job '{0}'...".format(sJobNameLong))
 
-    bOk, lStdOut = cathlsf.ExecBSub(sCommands=sB, bDoPrint=True, bDoPrintOnError=True)
+    bOk, lStdOut = cathlsf.Execute(
+        _sJobName=sJobName, _xCfgExecLsf=xLsfCfg, _sScript=sScript, _bDoPrint=True, _bDoPrintOnError=True
+    )
 
     return {"bOK": bOk, "sOutput": "\n".join(lStdOut)}
 

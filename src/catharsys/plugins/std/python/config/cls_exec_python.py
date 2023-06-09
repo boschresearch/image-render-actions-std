@@ -31,11 +31,6 @@ from catharsys.setup import conda
 
 
 class CConfigExecPython:
-
-    _dicData: dict = None
-    _dicPython: dict = None
-    _lType: list = None
-
     ################################################################################
     def __init__(self, _dicExec):
         self._dicData = copy.deepcopy(_dicExec)
@@ -50,19 +45,19 @@ class CConfigExecPython:
     # Properties
 
     @property
-    def dicPython(self):
+    def dicPython(self) -> dict:
         return self._dicPython
 
     # enddef
 
     @property
-    def sType(self):
+    def sType(self) -> str:
         return self._lType[3]
 
     # enddef
 
     @property
-    def pathPython(self):
+    def pathPython(self) -> Path:
         sPyPath = self._dicPython.get("sPath")
         if sPyPath is None:
             return None
@@ -72,34 +67,10 @@ class CConfigExecPython:
     # enddef
 
     @property
-    def sCondaEnv(self):
+    def sCondaEnv(self) -> str:
         return self._dicPython.get("sCondaEnv", conda.GetActiveEnvName())
 
     # enddef
-
-    @property
-    def lModules(self):
-        return self._dicData.get("lModules", [])
-
-    @property
-    def iJobGpuCores(self):
-        return self._dicData.get("iJobGpuCores", 1)
-
-    @property
-    def iJobMaxTime(self):
-        return self._dicData.get("iJobMaxTime", 240)
-
-    @property
-    def sJobQueue(self):
-        return self._dicData.get("sJobQueue", None)
-
-    @property
-    def bIsLsbGpuNewSyntax(self):
-        return self._dicData.get("iLsbGpuNewSyntax", 0) != 0
-
-    @property
-    def iJobMemReqGb(self):
-        return self._dicData.get("iJobMemReqGb", 0)
 
 
 # endclass
