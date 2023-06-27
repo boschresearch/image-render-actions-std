@@ -43,7 +43,7 @@ import catharsys.util.config as cathcfg
 import catharsys.util.path as cathpath
 import catharsys.plugins.std
 
-from catharsys.plugins.std.python.config.cls_anytruth_construct_flow_v1 import CAnytruthConstructFlow1
+from catharsys.plugins.std.python.config.cls_anytruth_construct_flow_v1 import CConfigAnytruthConstructFlow1
 
 print("Initializing CUDA...", flush=True)
 from catharsys.plugins.std.cuda.cls_eval_flow_ground_truth import CEvalFlowGroundTruth
@@ -59,37 +59,6 @@ import cv2
 class CConstructFlow:
 
     ################################################################################
-    # Constants
-    _iChX: int = 2
-    _iChY: int = 1
-    _iChZ: int = 0
-
-    # Define output types and formats
-    _dicTrgImgType: dict = {
-        "flow": {"sFolder": ".", "sExt": ".exr"},
-        # "preview": {"sFolder": "Preview", "sExt": ".png"},
-        # "debug": {"sFolder": "_debug", "sExt": ".png"},
-    }
-
-    ################################################################################
-    # Member variables
-    xPrjCfg: CProjectConfig = None
-    dicConfig: dict = None
-    dicData: dict = None
-
-    sPathTrgMain: str = None
-    pathSrcLocalPos3d: Path = None
-    pathSrcObjIdx: Path = None
-    dicPathTrgAct: dict = None
-    dicActDtiToName: dict = None
-    lActions: list = None
-    iFrameFirst: int = None
-    iFrameLast: int = None
-    iFrameStep: int = None
-    bDoProcess: bool = None
-    bDoOverwrite: bool = None
-    iDoProcess: int = None
-    iDoOverwrite: int = None
 
     ################################################################################
     # Properties
@@ -119,7 +88,36 @@ class CConstructFlow:
 
     ################################################################################
     def __init__(self):
-        pass
+        # Constants
+        self._iChX: int = 2
+        self._iChY: int = 1
+        self._iChZ: int = 0
+
+        # Define output types and formats
+        self._dicTrgImgType: dict = {
+            "flow": {"sFolder": ".", "sExt": ".exr"},
+            # "preview": {"sFolder": "Preview", "sExt": ".png"},
+            # "debug": {"sFolder": "_debug", "sExt": ".png"},
+        }
+
+        ################################################################################
+        # Member variables
+        self.xPrjCfg: CProjectConfig = None
+        self.dicConfig: dict = None
+        self.dicData: dict = None
+        self.sPathTrgMain: str = None
+        self.pathSrcLocalPos3d: Path = None
+        self.pathSrcObjIdx: Path = None
+        self.dicPathTrgAct: dict = None
+        self.dicActDtiToName: dict = None
+        self.lActions: list = None
+        self.iFrameFirst: int = None
+        self.iFrameLast: int = None
+        self.iFrameStep: int = None
+        self.bDoProcess: bool = None
+        self.bDoOverwrite: bool = None
+        self.iDoProcess: int = None
+        self.iDoOverwrite: int = None
 
     # enddef
 
@@ -195,7 +193,7 @@ class CConstructFlow:
                 "No label construction configuration of type compatible to '{0}' given".format(sConstructFlowDti)
             )
         # endif
-        xCFT = CAnytruthConstructFlow1(lCFT[0])
+        xCFT = CConfigAnytruthConstructFlow1(lCFT[0])
 
         # Initialize variable which will contain class instance of flow eval algo.
         # This can only be initialized once the image size is known.
@@ -235,10 +233,17 @@ class CConstructFlow:
             sMsgNotFound="Render path not given for action {sKey}",
         )
 
-        # Get the path to the local position render
-        self.pathSrcLocalPos3d = cathpath.MakeNormPath((sPathRenderAct, "AT_LocalPos3d_Raw"))
-        # Get the path to the object index render
-        self.pathSrcObjIdx = cathpath.MakeNormPath((sPathRenderAct, "AT_ObjectIdx_Raw"))
+        self.pathSrcLocalPos3d = xCFT.pathLocalPos3d
+        if not self.pathSrcLocalPos3d.is_absolute():
+            # Get the path to the local position render
+            self.pathSrcLocalPos3d = cathpath.MakeNormPath((sPathRenderAct, self.pathSrcLocalPos3d))
+        # endif
+
+        self.pathSrcObjIdx = xCFT.pathObjIdx
+        if not self.pathSrcObjIdx.is_absolute():
+            # Get the path to the object index render
+            self.pathSrcObjIdx = cathpath.MakeNormPath((sPathRenderAct, self.pathSrcObjIdx))
+        # endif
 
         ###################################################################################
         print("\nLocal pos. 3d source main path: {0}".format(self.pathSrcLocalPos3d.as_posix()))

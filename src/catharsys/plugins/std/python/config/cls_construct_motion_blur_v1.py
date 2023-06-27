@@ -35,15 +35,17 @@ from anybase import convert
 from anybase.cls_any_error import CAnyError_Message
 
 
-class CConfigAnytruthConstructFlow1(CConfigBase):
+class CConfigConstructMotionBlur1(CConfigBase):
     def __init__(self, _xSource: Union[str, list, tuple, Path, dict] = None):
 
-        super().__init__("/catharsys/blender/anytruth/construct/flow:1.0", _funcInitFromCfg=lambda: self._Init())
+        super().__init__("/catharsys/blender/construct/motion-blur:1.0", _funcInitFromCfg=lambda: self._Init())
 
-        self._iFrameDelta: int = None
-        self._tSearchRadiusXY: tuple[int, int] = None
+        self._tFilterRadiusXY: tuple[int, int] = None
         self._tStartXY: tuple[int, int] = None
         self._tRangeXY: tuple[int, int] = None
+        self._sPathFlow: str = None
+        self._sPathImage: str = None
+        self._sImageFileExt: str = None
 
         if isinstance(_xSource, dict):
             self.FromDict(_xSource)
@@ -51,41 +53,24 @@ class CConfigAnytruthConstructFlow1(CConfigBase):
             self.FromFile(_xSource)
         # endif
 
-        # def GetInitFunc(this):
-        #     def Init():
-        #         this._Init()
-        #     # enddef
-        #     return Init
-        # # enddef
-
-        # self._funcInitFromCfg = lambda: self._Init()
-
     # enddef
 
     def _Init(self):
 
-        self._iFrameDelta = convert.DictElementToInt(self._dicCfg, "iFrameDelta")
-        self._tSearchRadiusXY = tuple(convert.DictElementToIntList(self._dicCfg, "lSearchRadiusXY", iLen=2))
+        self._tFilterRadiusXY = tuple(convert.DictElementToIntList(self._dicCfg, "lFilterRadiusXY", iLen=2))
 
         self._tStartXY = tuple(convert.DictElementToIntList(self._dicCfg, "lStartXY", iLen=2, lDefault=[0, 0]))
         self._tRangeXY = tuple(convert.DictElementToIntList(self._dicCfg, "lRangeXY", iLen=2, lDefault=[0, 0]))
 
-        self._sPathLocalPos3d = convert.DictElementToString(
-            self._dicCfg, "sPathLocalPos3d", sDefault="AT_LocalPos3d_Raw"
-        )
-        self._sPathObjIdx = convert.DictElementToString(self._dicCfg, "sPathObjIdx", sDefault="AT_ObjectIdx_Raw")
+        self._sPathFlow = convert.DictElementToString(self._dicCfg, "sPathFlow")
+        self._sPathImage = convert.DictElementToString(self._dicCfg, "sPathImage")
+        self._sImageFileExt = convert.DictElementToString(self._dicCfg, "sImageFileExt")
 
     # endif
 
     @property
-    def iFrameDelta(self) -> int:
-        return self._iFrameDelta
-
-    # enddef
-
-    @property
-    def tSearchRadiusXY(self) -> tuple[int, int]:
-        return self._tSearchRadiusXY
+    def tFilterRadiusXY(self) -> tuple[int, int]:
+        return self._tFilterRadiusXY
 
     # enddef
 
@@ -102,14 +87,23 @@ class CConfigAnytruthConstructFlow1(CConfigBase):
     # enddef
 
     @property
-    def pathLocalPos3d(self) -> Path:
-        return Path(self._sPathLocalPos3d)
+    def pathFlow(self) -> Path:
+        return Path(self._sPathFlow)
 
     # enddef
 
     @property
-    def pathObjIdx(self) -> Path:
-        return Path(self._sPathObjIdx)
+    def pathImage(self) -> Path:
+        return Path(self._sPathImage)
+
+    # enddef
+
+    @property
+    def sImageFileExt(self) -> str:
+        if not self._sImageFileExt.startswith("."):
+            return f".{self._sImageFileExt}"
+        # endif
+        return self._sImageFileExt
 
     # enddef
 

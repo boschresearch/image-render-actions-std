@@ -68,29 +68,27 @@ class CEvalMotionBlur:
     def __init__(
         self,
         *,
-        _tiImageShape: tuple[int, int, int],
-        _tiSearchRadiusXY: tuple[int, int],
+        _tiImageShape: Union[tuple[int, int], tuple[int, int, int]],
+        _tiFilterRadiusXY: tuple[int, int],
         _tiStartXY: tuple[int, int] = (0, 0),
         _tiRangeXY: tuple[int, int] = (0, 0),
     ):
-        self._kernFlow = None
-        self._aIdxMapXY: np.ndarray = None
-        self._aSubPixMapXY: np.ndarray = None
+        self._kernBlur = None
 
         if len(_tiImageShape) < 2 or len(_tiImageShape) > 3:
             raise CAnyError_Message(sMsg="Image shape must be 2 or 3 dimenional")
         # endif
 
         self._tiSizeXY: tuple[int, int] = (_tiImageShape[1], _tiImageShape[0])
-        self._iPosChanCnt: int = None
+        self._iImgChanCnt: int = None
 
         if len(_tiImageShape) == 3:
-            self._iPosChanCnt = _tiImageShape[2]
+            self._iImgChanCnt = _tiImageShape[2]
         else:
-            self._iPosChanCnt = 1
+            self._iImgChanCnt = 1
         # endif
 
-        self._tiSearchRadiusXY = _tiSearchRadiusXY
+        self._tiFilterRadiusXY = _tiFilterRadiusXY
         self._tiStartXY = _tiStartXY
 
         self._tiRangeXY = tuple(_tiRangeXY[i] if _tiRangeXY[i] > 0 else self._tiSizeXY[i] for i in range(2))
@@ -108,40 +106,37 @@ class CEvalMotionBlur:
         )
 
         sKernelFlowCode: str = None
+        self._aImageBlur = None
 
         # Load the flow evaluation CUDA kernel from ressources
         try:
-            xKernelFlow = res.files(catharsys.plugins.std).joinpath("res").joinpath("EvalFlowGroundTruth.cu")
+            xKernelFlow = res.files(catharsys.plugins.std).joinpath("res").joinpath("EvalMotionBlur.cu")
             with res.as_file(xKernelFlow) as pathKernelFlow:
                 sKernelFlowCode = pathKernelFlow.read_text()
             # endwith
         except Exception as xEx:
-            raise CAnyError_Message(sMsg="Error loading CUDA kernel for flow ground truth evaluation", xChildEx=xEx)
+            raise CAnyError_Message(sMsg="Error loading CUDA kernel for motion blur evaluation", xChildEx=xEx)
         # endtry
 
-        iPosRowStride = self._tiSizeXY[0] * self._iPosChanCnt
+        iImgRowStride = self._tiSizeXY[0] * self._iImgChanCnt
 
-        self._iIdxChanCnt: int = 5
-        iIdxRowStride = self._iIdxChanCnt * self._tiRangeXY[0]
+        self._iFlowChanCnt: int = 4
+        iFlowRowStride = self._iFlowChanCnt * self._tiRangeXY[0]
 
-        self._iSubPixChanCnt: int = 4
-        iSubPixRowStride = self._iSubPixChanCnt * self._tiRangeXY[0]
-
-        sFuncFlowExp = (
-            f"EvalFlow<{self._tiStartXY[0]}, {self._tiStartXY[1]}, "
+        sFuncBlurExp = (
+            f"EvalMotionBlur<{self._tiStartXY[0]}, {self._tiStartXY[1]}, "
             f"{self._tiRangeXY[0]}, {self._tiRangeXY[1]}, "
             f"{self._tiSizeXY[0]}, {self._tiSizeXY[1]}, "
-            f"{self._tiSearchRadiusXY[0]}, {self._tiSearchRadiusXY[1]}, "
-            f"{self._iPosChanCnt}, {iPosRowStride}, "
-            f"{self._iIdxChanCnt}, {iIdxRowStride}, "
-            f"{self._iSubPixChanCnt}, {iSubPixRowStride}>"
+            f"{self._tiFilterRadiusXY[0]}, {self._tiFilterRadiusXY[1]}, "
+            f"{iImgRowStride}, {iFlowRowStride}, "
+            f"{self._iImgChanCnt}, {self._iFlowChanCnt}>"
         )
 
         try:
-            modKernel = cp.RawModule(code=sKernelFlowCode, options=("-std=c++11",), name_expressions=[sFuncFlowExp])
-            self._kernFlow = modKernel.get_function(sFuncFlowExp)
+            modKernel = cp.RawModule(code=sKernelFlowCode, options=("-std=c++11",), name_expressions=[sFuncBlurExp])
+            self._kernBlur = modKernel.get_function(sFuncBlurExp)
         except Exception as xEx:
-            raise CAnyError_Message(sMsg="Error compiling flow ground truth evaluation kernel", xChildEx=xEx)
+            raise CAnyError_Message(sMsg="Error compiling motion blur evaluation kernel", xChildEx=xEx)
         # endtry
 
     # enddef
@@ -150,33 +145,8 @@ class CEvalMotionBlur:
     # properties
 
     @property
-    def aIdxMapXY(self) -> np.ndarray:
-        return self._aIdxMapXY
-
-    # enddef
-
-    @property
-    def aSubPixMapXY(self) -> np.ndarray:
-        return self._aSubPixMapXY
-
-    # enddef
-
-    # ##################################################################################################################
-    # Convert array of spherical coordiantes to cartesian coordinates
-    def _SphericalToCartesian(self, _imgPos: np.ndarray, *, _tRgbIdx: tuple[int, int, int] = (0, 1, 2)) -> np.ndarray:
-
-        imgPos = np.zeros_like(_imgPos)
-
-        imgRad = _imgPos[:, :, _tRgbIdx[0]]
-        imgTheta = _imgPos[:, :, _tRgbIdx[1]]
-        imgPhi = _imgPos[:, :, _tRgbIdx[2]] - math.pi
-        imgSinTheta = np.sin(imgTheta)
-
-        imgPos[:, :, _tRgbIdx[0]] = imgRad * imgSinTheta * np.cos(imgPhi)
-        imgPos[:, :, _tRgbIdx[1]] = imgRad * imgSinTheta * np.sin(imgPhi)
-        imgPos[:, :, _tRgbIdx[2]] = imgRad * np.cos(imgTheta)
-
-        return imgPos
+    def aImageBlur(self) -> np.ndarray:
+        return self._aImageBlur
 
     # enddef
 
@@ -185,127 +155,30 @@ class CEvalMotionBlur:
     def Eval(
         self,
         *,
-        _imgPos1: np.ndarray,
-        _imgPos2: np.ndarray,
-        _imgObjIdx1: np.ndarray,
-        _imgObjIdx2: np.ndarray,
-        _iChObjIdx: int,
-        _iChInstId: int,
-        _bSphericalCS: bool = False,
-        _tRgbIdx: tuple[int, int, int] = (0, 1, 2),
+        _imgImage1: np.ndarray,
+        _imgImage2: np.ndarray,
+        _imgFlow: np.ndarray,
     ):
-        """Evaluate the image flow ground truth from local object position and object index renders.
-        The flow is calculated from image 1 to image 2. The result is stored in the class instance in two variables:
-        aIdxMapXY and aSubPixMapXY, which are both flat lists of the size set by _tiRangeXY in the constructure.
-        These variables have the following content:
+        """Evaluate motion blur between two images using their optical flow."""
 
-        aIdxMapXY: (array of array of 5 integers)
-            0: A unique object index.
-            1: The start position x-coordinate (horizontal from left to right)
-            2: The start position y-coordinate (vertical from top to bottom)
-            3: The end position x-coordinate
-            4: The end position y-coordinate
+        caImage1 = cp.asarray(_imgImage1, dtype=cp.float32)
+        caImage2 = cp.asarray(_imgImage2, dtype=cp.float32)
+        caFlow = cp.asarray(_imgFlow, dtype=cp.float32)
+        caResult = cp.full((self._tiSizeXY[0], self._tiSizeXY[1], self._iImgChanCnt), 0.0, dtype=cp.float32)
 
-        aSubPixMapXY: (array of array of 4 floats)
-            0: The start position x-coordinate
-            1: The start position y-coordinate
-            2: The sub-pixel flow vector x-coordinate from image 1 to 2
-            3: The sub-pixel flow vector y-coordinate from image 1 to 2
+        fFlowFactor: float = 1.0
+        cfFlowFactor = cp.float32(fFlowFactor)
 
-        Parameters
-        ----------
-        _imgPos1 : np.ndarray, dimension (y-dim, x-dim, 3)
-            The start image of the rendered local object coordinates
-        _imgPos2 : np.ndarray, dimension (y-dim, x-dim, 3)
-            The end image of the rendered local object coordinates
-        _imgObjIdx1 : np.ndarray, dimension (y-dim, x-dim, 3)
-            The start image of the rendered object indices.
-            For each pixel, there are three floating point values: Object index, Material index, Instance id
-        _imgObjIdx2 : np.ndarray, dimension (y-dim, x-dim, 3)
-            The end image of the rendered object indices.
-            For each pixel, there are three floating point values: Object index, Material index, Instance id
-        _iChObjIdx : int
-            The index of the channel that contains the object index in _imgObjIdx1 und _imgObjIdx2.
-        _iChInstId : int
-            The index of the channel that contains the instance id in _imgObjIdx1 und _imgObjIdx2.
-        _bSphericalCS : bool
-            If true, the _imgPos1 and _imgPos2 contain 3D coordinates in a spherical coordinate system,
-            in the order [Radius, Theta (inclination), Phi (azimuth)] for color channels [Red, Green, Blue].
-            See also https://en.wikipedia.org/wiki/Spherical_coordinate_system.
-        _tRgbIdx : tuple[int, int, int]
-            The indices of the red, green and blue channel in _imgPos1 and _imgPos2.
-        Raises
-        ------
-        CAnyError_Message
-            For any usage error.
-        """
+        self._kernBlur(self._tiBlockDimXY, (self._iThreadCnt,), (caImage1, caImage2, caFlow, cfFlowFactor, caResult))
 
-        self._aIdxMapXY: np.ndarray = None
-        self._aSubPixMapXY: np.ndarray = None
-
-        tSize2d: tuple[int, int] = _imgPos1.shape[0:2]
-
-        if tSize2d != _imgPos2.shape[0:2] or tSize2d != _imgObjIdx1.shape[0:2] or tSize2d != _imgObjIdx2.shape[0:2]:
-            raise CAnyError_Message(sMsg="Given images have different sizes")
-        # endif
-
-        iRows, iCols, iChan = _imgObjIdx1.shape
-
-        imgObjFlat1 = _imgObjIdx1.reshape(-1, iChan)
-        imgObjFlatId1 = imgObjFlat1[:, _iChInstId] + imgObjFlat1[:, _iChObjIdx]
-
-        aU, aMaskObjIdx1 = cp.unique(imgObjFlatId1, return_inverse=True)
-        imgObjUid1 = aMaskObjIdx1.reshape(iRows, iCols)
-
-        aObjFlat2 = _imgObjIdx2.reshape(-1, iChan)
-        aObjFlatId2 = aObjFlat2[:, _iChObjIdx] + aObjFlat2[:, _iChInstId]
-        aObjIdxFlat2 = np.ones((iRows * iCols), dtype=int) * -1
-
-        for iObjIdx in range(len(aU)):
-            aMask = aObjFlatId2 == aU[iObjIdx].item()
-            aObjIdxFlat2[aMask] = iObjIdx
-        # endfor
-
-        imgObjUid2 = aObjIdxFlat2.reshape(iRows, iCols)
-
-        aInvalidIdx = np.argwhere(aU < 1.0)
-        for iIdx in aInvalidIdx:
-            imgObjUid1[imgObjUid1 == iIdx.item()] = -1
-            imgObjUid2[imgObjUid2 == iIdx.item()] = -1
-        # endfor
-
-        caIdxMapXY = cp.ones((self._tiRangeXY[1], self._tiRangeXY[0], self._iIdxChanCnt), dtype=cp.int32)
-        caIdxMapXY *= -1
-
-        caSubPixMapXY = cp.full(
-            (self._tiRangeXY[1], self._tiRangeXY[0], self._iSubPixChanCnt), cp.nan, dtype=cp.float32
-        )
-
-        # Convert imgPos images if needed
-        if _bSphericalCS is True:
-            caPos1 = cp.asarray(self._SphericalToCartesian(_imgPos1, _tRgbIdx=_tRgbIdx), dtype=cp.float32)
-            caPos2 = cp.asarray(self._SphericalToCartesian(_imgPos2, _tRgbIdx=_tRgbIdx), dtype=cp.float32)
-        else:
-            caPos1 = cp.asarray(_imgPos1, dtype=cp.float32)
-            caPos2 = cp.asarray(_imgPos2, dtype=cp.float32)
-        # endif
-
-        caObjUid1 = cp.asarray(imgObjUid1, dtype=cp.int32)
-        caObjUid2 = cp.asarray(imgObjUid2, dtype=cp.int32)
-
-        self._kernFlow(
-            self._tiBlockDimXY, (self._iThreadCnt,), (caPos1, caPos2, caObjUid1, caObjUid2, caIdxMapXY, caSubPixMapXY)
-        )
-
-        self._aIdxMapXY = cp.asnumpy(caIdxMapXY)
-        self._aSubPixMapXY = cp.asnumpy(caSubPixMapXY)
+        self._aImageBlur = cp.asnumpy(caResult)
 
     # enddef
 
     # ##################################################################################################################
     # Write flow data to EXR file
 
-    def SaveFlowImage(self, _xPathFile: Union[str, list, tuple, Path]):
+    def SaveBlurImage(self, _xPathFile: Union[str, list, tuple, Path]):
         """Save flow image to file.
            The filename must end in '.exr', to store the image in OpenEXR format.
 
@@ -322,46 +195,18 @@ class CEvalMotionBlur:
                 3: Valid flag, 1 for valid flow vectors, 0 for pixels where no flow could be calculated.
         """
         pathFile = anypath.MakeNormPath(_xPathFile)
-        if pathFile.suffix != ".exr":
-            raise CAnyError_Message(
-                sMsg="Flow image can only be saved in OpenEXR format. Please provide a filename with suffix '.exr'"
-            )
+
+        if self._aImageBlur is None:
+            raise CAnyError_Message(sMsg="Motion Blur has not been evaluated")
         # endif
 
-        if self.aIdxMapXY is None or self.aSubPixMapXY is None:
-            raise CAnyError_Message(sMsg="Flow has not been evaluated")
-        # endif
-
-        # Reversed order of color channels, due to OpenCV BGR image convention.
-        iChX: int = 2
-        iChY: int = 1
-        iChZ: int = 0
-
-        iPosCols, iPosRows = self._tiSizeXY
-
-        aMaskValidFlow = self.aIdxMapXY[:, :, 3] >= 0
-        aValidIdxXY = self.aIdxMapXY[aMaskValidFlow][:, 1:3]
-        aValidIdxPos = aValidIdxXY[:, 1] * iPosCols + aValidIdxXY[:, 0]
-
-        aFlowXY = self.aSubPixMapXY[aMaskValidFlow][:, 2:4]
-        aObjIdx = self.aIdxMapXY[aMaskValidFlow][:, 0].astype(float)
-
-        imgValidMap = np.zeros((iPosRows, iPosCols), dtype=bool)
-        aValidMapFlat = imgValidMap.flatten()
-        aValidMapFlat[aValidIdxPos] = True
-        imgValidMap = aValidMapFlat.reshape(iPosRows, iPosCols)
-
-        imgFlow = np.zeros((iPosRows, iPosCols, 4), dtype=np.float32)
-        imgFlow[imgValidMap, iChX] = aFlowXY[:, 0]
-        imgFlow[imgValidMap, iChY] = aFlowXY[:, 1]
-        imgFlow[imgValidMap, iChZ] = aObjIdx
-        imgFlow[imgValidMap, 3] = 1.0
+        aImgBlurWrite = self._aImageBlur[:, :, [2, 1, 0]]
 
         try:
-            cv2.imwrite(pathFile.as_posix(), imgFlow)
+            cv2.imwrite(pathFile.as_posix(), aImgBlurWrite)
         except Exception as xEx:
             raise CAnyError_Message(
-                sMsg=f"Error writing flow ground truth image to path: {(pathFile.as_posix())}", xChildEx=xEx
+                sMsg=f"Error writing motion blur image to path: {(pathFile.as_posix())}", xChildEx=xEx
             )
         # endtry
 
