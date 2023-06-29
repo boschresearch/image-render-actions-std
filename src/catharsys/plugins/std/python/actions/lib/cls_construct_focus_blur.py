@@ -42,10 +42,10 @@ import catharsys.util.config as cathcfg
 import catharsys.util.path as cathpath
 import catharsys.plugins.std
 
-from catharsys.plugins.std.python.config.cls_construct_motion_blur_v1 import CConfigConstructMotionBlur1
+from catharsys.plugins.std.python.config.cls_construct_focus_blur_v1 import CConfigConstructFocusBlurModel1
 
 print("Initializing CUDA...", flush=True)
-from catharsys.plugins.std.cuda.cls_eval_motion_blur import CEvalMotionBlur
+from catharsys.plugins.std.cuda.cls_eval_focus_blur_model1 import CEvalFocusBlurModel1
 
 print("done", flush=True)
 
@@ -55,7 +55,7 @@ import cv2
 
 
 ################################################################################
-class CConstructMotionBlur:
+class CConstructFocusBlur:
 
     ################################################################################
 
@@ -86,7 +86,7 @@ class CConstructMotionBlur:
         self.dicData: dict = None
 
         self.sPathTrgMain: str = None
-        self.pathSrcFlow: Path = None
+        self.pathSrcDepth: Path = None
         self.pathSrcImage: Path = None
         self.dicPathTrgAct: dict = None
         self.dicActDtiToName: dict = None
@@ -171,7 +171,7 @@ class CConstructMotionBlur:
 
         # Define expected type names
         sRenderTypeListDti = "blender/render/output-list:1"
-        sConstructMotionBlurDti = "blender/construct/motion-blur:1"
+        sConstructFocusBlurDti = "blender/construct/focus-blur/*:1"
 
         lRndTypeList = cathcfg.GetDataBlocksOfType(self.dicData, sRenderTypeListDti)
         if len(lRndTypeList) == 0:
@@ -188,17 +188,43 @@ class CConstructMotionBlur:
         # dicRndOutLocalPos3d = self._GetRndOutDict(_sSubType="anytruth/local-pos3d:1", _lRndOutTypes=lRndOutTypes)
         # dicRndOutObjIdx = self._GetRndOutDict(_sSubType="anytruth/object-idx:1", _lRndOutTypes=lRndOutTypes)
 
-        lCMB = cathcfg.GetDataBlocksOfType(self.dicData, sConstructMotionBlurDti)
+        lCMB = cathcfg.GetDataBlocksOfType(self.dicData, sConstructFocusBlurDti)
         if len(lCMB) == 0:
             raise Exception(
-                "No label construction configuration of type compatible to '{0}' given".format(sConstructMotionBlurDti)
+                "No label construction configuration of type compatible to '{0}' given".format(sConstructFocusBlurDti)
             )
         # endif
-        xCMB = CConfigConstructMotionBlur1(lCMB[0])
+        dicCfgDti = cathcfg.CheckConfigType(lCMB[0], sConstructFocusBlurDti)
+        sFocusBlurType = dicCfgDti["lCfgType"][4]
+        xCfg = None
+        if sFocusBlurType == "model1":
+            xCfg = CConfigConstructFocusBlurModel1(lCMB[0])
+
+            funcEvalInit = lambda tImageShape: CEvalFocusBlurModel1(
+                _tiImageShape=tImageShape,
+                _tiFilterRadiusXY=xCfg.tFilterRadiusXY,
+                _tiStartXY=xCfg.tStartXY,
+                _tiRangeXY=xCfg.tRangeXY,
+            )
+
+            funcEval = lambda xEvalFocusBlur, imgImage, imgDepth: xEvalFocusBlur.Eval(
+                _imgImage=imgImage,
+                _imgDepth=imgDepth,
+                _fFocusDepth_mm=xCfg.fFocusDepth_mm,
+                _fFocalLength_mm=xCfg.fFocalLength_mm,
+                _fApertureDia_mm=xCfg.fApertureDia_mm,
+                _fPixelPitch_mm=xCfg.fPixelPitch_mm,
+                _fFocalPlanePos_mm=xCfg.fFocalPlanePos_mm,
+                _fMMperDepthUnit=xCfg.fMMperDepthUnit,
+            )
+
+        else:
+            raise RuntimeError(f"Unsupported focus blur type '{sFocusBlurType}'")
+        # endif
 
         # Initialize variable which will contain class instance of flow eval algo.
         # This can only be initialized once the image size is known.
-        xEvalBlur: CEvalMotionBlur = None
+        xEvalFocusBlur = None
 
         cathcfg.StoreDictValuesInObject(
             self,
@@ -234,19 +260,19 @@ class CConstructMotionBlur:
             sMsgNotFound="Render path not given for action {sKey}",
         )
 
-        self.pathSrcFlow = xCMB.pathFlow
-        if not self.pathSrcFlow.is_absolute():
+        self.pathSrcDepth = xCfg.pathDepth
+        if not self.pathSrcDepth.is_absolute():
             # Get the path to the local position render
-            self.pathSrcFlow = cathpath.MakeNormPath((sPathRenderAct, self.pathSrcFlow))
+            self.pathSrcDepth = cathpath.MakeNormPath((sPathRenderAct, self.pathSrcDepth))
         # endif
 
-        self.pathSrcImage = xCMB.pathImage
+        self.pathSrcImage = xCfg.pathImage
         if not self.pathSrcImage.is_absolute():
             self.pathSrcImage = cathpath.MakeNormPath((sPathRenderAct, self.pathSrcImage))
         # endif
 
         ###################################################################################
-        print("\nFlow source main path: {0}".format(self.pathSrcFlow.as_posix()))
+        print("\nDepth source main path: {0}".format(self.pathSrcDepth.as_posix()))
         print("\nImage source main path: {0}".format(self.pathSrcImage.as_posix()))
         print("\nMain output path: {0}".format(self.sPathTrgMain))
         print("\nFirst rendered frame: {0}".format(self.iFrameFirst))
@@ -282,38 +308,28 @@ class CConstructMotionBlur:
             iTrgFrame += self.iFrameStep
             iTrgFrameIdx += 1
 
-            iImageFrame1: int = None
-            iImageFrame2: int = None
+            iImageFrame: int = None
 
-            iImageFrame1 = iTrgFrame
-            iImageFrame2 = iTrgFrame + 1
+            iImageFrame = iTrgFrame
 
             print("")
-            print(f"Start processing motion blur for frames {iImageFrame1} -> {iImageFrame2}...", flush=True)
+            print(f"Start processing focus blur for frame {iImageFrame}...", flush=True)
 
             ###################################################################
-            sTrgFrameName = "Frame_{0:04d}".format(iImageFrame1)
-            sFrameName1 = "Frame_{0:04d}".format(iImageFrame1)
-            sFrameName2 = "Frame_{0:04d}".format(iImageFrame2)
-            sFileImgSrc1 = f"{sFrameName1}{xCMB.sImageFileExt}"
-            sFileImgSrc2 = f"{sFrameName2}{xCMB.sImageFileExt}"
-            sFileFlowSrc = f"{sFrameName1}.exr"
+            sTrgFrameName = "Frame_{0:04d}".format(iImageFrame)
+            sFrameName = "Frame_{0:04d}".format(iImageFrame)
+            sFileImgSrc = f"{sFrameName}{xCfg.sImageFileExt}"
+            sFileDepthSrc = f"{sFrameName}.exr"
 
-            pathFileImg1 = cathpath.MakeNormPath((self.pathSrcImage, sFileImgSrc1))
-            if not pathFileImg1.exists():
-                print(f"Image frame '{iImageFrame1}' does not exist at {(pathFileImg1.as_posix())}. Skipping...")
+            pathFileImg = cathpath.MakeNormPath((self.pathSrcImage, sFileImgSrc))
+            if not pathFileImg.exists():
+                print(f"Image frame '{iImageFrame}' does not exist at {(pathFileImg.as_posix())}. Skipping...")
                 continue
             # endif
 
-            pathFileImg2 = cathpath.MakeNormPath((self.pathSrcImage, sFileImgSrc2))
-            if not pathFileImg2.exists():
-                print(f"Image frame '{iImageFrame2}' does not exist at {(pathFileImg2.as_posix())}. Skipping...")
-                continue
-            # endif
-
-            pathFileFlow = cathpath.MakeNormPath((self.pathSrcFlow, sFileFlowSrc))
-            if not pathFileFlow.exists():
-                print(f"Flow frame '{iImageFrame1}' does not exist at {(pathFileFlow.as_posix())}. Skipping...")
+            pathFileDepth = cathpath.MakeNormPath((self.pathSrcDepth, sFileDepthSrc))
+            if not pathFileDepth.exists():
+                print(f"Flow frame '{iImageFrame}' does not exist at {(pathFileDepth.as_posix())}. Skipping...")
                 continue
             # endif
 
@@ -343,64 +359,46 @@ class CConstructMotionBlur:
 
             # Load images
             print("Loading images...", flush=True)
-            imgImage1 = self._LoadImage(pathFileImg1)
-            if imgImage1 is None:
+            imgImage = self._LoadImage(pathFileImg)
+            if imgImage is None:
                 continue
             # endif
 
-            imgImage2 = self._LoadImage(pathFileImg2)
-            if imgImage2 is None:
-                continue
-            # endif
-
-            imgFlow = self._LoadImage(pathFileFlow)
-            if imgFlow is None:
+            imgDepth = self._LoadImage(pathFileDepth)
+            if imgDepth is None:
                 continue
             # endif
             print("done.", flush=True)
 
-            iImgRows, iImgCols = imgImage1.shape[0:2]
-            iFlowRows, iFlowCols = imgFlow.shape[0:2]
+            iImgRows, iImgCols = imgImage.shape[0:2]
+            iDepthRows, iDepthCols = imgDepth.shape[0:2]
 
-            if iFlowRows != iImgRows or iFlowCols != iImgCols:
+            if iDepthRows != iImgRows or iDepthCols != iImgCols:
                 print(
-                    "Error: image and flow have different sizes: "
-                    f"[{iImgCols}, {iImgRows}] vs [{iFlowCols}, {iFlowRows}]"
-                )
-                continue
-            # endif
-
-            if imgImage1.shape != imgImage2.shape:
-                print(
-                    f"Error: images for frames {iImageFrame1} and {iImageFrame2} have different sizes: "
-                    f"{imgImage1.shape} vs {imgImage2.shape}"
+                    "Error: image and depth have different sizes: "
+                    f"[{iImgCols}, {iImgRows}] vs [{iDepthCols}, {iDepthRows}]"
                 )
                 continue
             # endif
 
             ################################################################################
-            # Evaluate flow
+            # Evaluate focus blur
 
             # Only initialize blur algo kernel once.
             # Assumes that all images have the same size.
-            if xEvalBlur is None:
+            if xEvalFocusBlur is None:
                 print("Compiling CUDA kernel...", flush=True)
-                xEvalBlur = CEvalMotionBlur(
-                    _tiImageShape=imgImage1.shape,
-                    _tiFilterRadiusXY=xCMB.tFilterRadiusXY,
-                    _tiStartXY=xCMB.tStartXY,
-                    _tiRangeXY=xCMB.tRangeXY,
-                )
+                xEvalFocusBlur = funcEvalInit(imgImage.shape)
                 print("done")
             # endif
 
             print("Evaluate motion blur...", flush=True)
-            xEvalBlur.Eval(_imgImage1=imgImage1, _imgImage2=imgImage2, _imgFlow=imgFlow)
+            funcEval(xEvalFocusBlur, imgImage, imgDepth)
             print("done", flush=True)
 
             print("Saving motion blur image...", flush=True)
             sFpImgTrg: str = self.dicTrgImgType["blur"]["sFpImgTrg"]
-            xEvalBlur.SaveBlurImage(sFpImgTrg)
+            xEvalFocusBlur.SaveBlurImage(sFpImgTrg)
             print("done", flush=True)
         # endwhile iTrgFrame
 
