@@ -51,6 +51,18 @@ __device__ void inline assign_float3(float *pData, const int iIdx, const float3 
     pData[iIdx + 2] = vX.z;
 }
 
+__device__ float3 inline abs(const float3 &vX)
+{
+    float3 vY = {abs(vX.x), abs(vX.y), abs(vX.z)};
+    return vY;
+}
+
+__device__ float3 inline max(const float3 &vX, const float3 &vY)
+{
+    float3 vZ = {max(vX.x, vY.x), max(vX.y, vY.y), max(vX.z, vY.z)};
+    return vZ;
+}
+
 __device__ float inline dot(const float3 &vX, const float3 &vY)
 {
     return vX.x * vY.x + vX.y * vY.y + vX.z * vY.z;
@@ -93,6 +105,12 @@ __device__ float3 inline operator*(const float3 &vA, const float &fS)
 __device__ float3 inline operator/(const float3 &vA, const float &fS)
 {
     float3 vX = {vA.x / fS, vA.y / fS, vA.z / fS};
+    return vX;
+}
+
+__device__ float3 inline operator/(const float3 &vA, const float3 &vB)
+{
+    float3 vX = {vA.x / vB.x, vA.y / vB.y, vA.z / vB.z};
     return vX;
 }
 
@@ -148,11 +166,42 @@ __global__ void EvalFlow(const float *aPos1, const float *aPos2, const int *aObj
 
     const bool bValidSrcIdx = (iObjIdx1 >= 0 && iTrgIdxX1 == iIdxX1 && iTrgIdxY1 == iIdxY1 && iTrgX == iX && iTrgY == iY);
 
-    float3 vPos1 = make_float3(aPos1, iPosIdx1);
+    const float3 vPos1 = make_float3(aPos1, iPosIdx1);
+    float3 vMaxDiff = make_float3(1e-3, 1e-3, 1e-3);
+
+    // find the maximal gradient for each position dimension separately
+    for (int iOffY = -1; iOffY <= 1; iOffY++)
+    {
+        const int iIterIdxY2 = iIdxY1 + iOffY;
+        const int iIdxY2 = min(max(iIterIdxY2, 0), t_iSizeY - 1);
+        const int iPosIdxY2 = t_iPosRowStride * iIdxY2;
+        const bool bValidY = (bValidSrcIdx && iIterIdxY2 == iIdxY2);
+
+        for (int iOffX = -1; iOffX <= 1; iOffX++)
+        {
+            const int iIterIdxX2 = iIdxX1 + iOffX;
+            const int iIdxX2 = min(max(iIterIdxX2, 0), t_iSizeX - 1);
+
+            const int iPosIdx2 = iPosIdxY2 + t_iPosChanCnt * iIdxX2;
+            const int iPosObjIdx2 = t_iSizeX * iIdxY2 + iIdxX2;
+
+            const bool bValid = (bValidY && iIterIdxX2 == iIdxX2 && iObjIdx1 == aObjIdx1[iPosObjIdx2]);
+
+            const float3 vPos2 = make_float3(aPos1, iPosIdx2);
+            const float3 vDiff = abs(vPos1 - vPos2);
+
+            if (bValid)
+            {
+                vMaxDiff = max(vDiff, vMaxDiff);
+            }
+        }
+    }
+
+    vMaxDiff = vMaxDiff / max(vMaxDiff.x, max(vMaxDiff.y, vMaxDiff.z));
 
     float fMinValue = 1e9;
     int iMinPosIdx2 = -1;
-    int iMinObjIdx2 = -1;
+    // int iMinObjIdx2 = -1;
 
     for (int iOffY = -t_iSearchRadiusY; iOffY <= t_iSearchRadiusY; iOffY++)
     {
@@ -173,13 +222,13 @@ __global__ void EvalFlow(const float *aPos1, const float *aPos2, const int *aObj
 
             float fValue = 0.0;
             float3 vPos2 = make_float3(aPos2, iPosIdx2);
-            fValue = sumsq(vPos1 - vPos2);
+            fValue = sqrt(sumsq((vPos1 - vPos2) / vMaxDiff));
 
             if (bValid && fValue < fMinValue)
             {
                 fMinValue = fValue;
                 iMinPosIdx2 = iPosIdx2;
-                iMinObjIdx2 = aObjIdx2[iPosObjIdx2];
+                // iMinObjIdx2 = aObjIdx2[iPosObjIdx2];
             }
         }
     }
@@ -308,8 +357,8 @@ __global__ void EvalFlow(const float *aPos1, const float *aPos2, const int *aObj
 
         if (bSubPixValid)
         {
-            const float fMapX = float(iMapX) + fIdxH;
-            const float fMapY = float(iMapY) + fIdxV;
+            const float fMapX = float(iMapX); // + fIdxH;
+            const float fMapY = float(iMapY); // + fIdxV;
 
             pfSubPixIdx[iSubPixIdxPos + 0] = fMapX;
             pfSubPixIdx[iSubPixIdxPos + 1] = fMapY;

@@ -216,6 +216,7 @@ class CConstructFocusBlur:
                 _fPixelPitch_mm=xCfg.fPixelPitch_mm,
                 _fFocalPlanePos_mm=xCfg.fFocalPlanePos_mm,
                 _fMMperDepthUnit=xCfg.fMMperDepthUnit,
+                _fBackgroundDepth_mm=xCfg.fBackgroundDepth_mm,
             )
 
         else:
@@ -301,7 +302,7 @@ class CConstructFocusBlur:
 
         # Do not evaluate flow for last frame "self.iFrameLast", because we assume
         # that this is the last rendered frame for which no forward flow can be calculated.
-        while (iTrgFrame + self.iFrameStep) < self.iFrameLast:
+        while iTrgFrame < self.iFrameLast:
 
             # increment indices here to enable 'continue'
             # without need to increment at each continue command
@@ -329,7 +330,7 @@ class CConstructFocusBlur:
 
             pathFileDepth = cathpath.MakeNormPath((self.pathSrcDepth, sFileDepthSrc))
             if not pathFileDepth.exists():
-                print(f"Flow frame '{iImageFrame}' does not exist at {(pathFileDepth.as_posix())}. Skipping...")
+                print(f"Depth frame '{iImageFrame}' does not exist at {(pathFileDepth.as_posix())}. Skipping...")
                 continue
             # endif
 
@@ -392,11 +393,11 @@ class CConstructFocusBlur:
                 print("done")
             # endif
 
-            print("Evaluate motion blur...", flush=True)
+            print("Evaluate focus blur...", flush=True)
             funcEval(xEvalFocusBlur, imgImage, imgDepth)
             print("done", flush=True)
 
-            print("Saving motion blur image...", flush=True)
+            print("Saving focus blur image...", flush=True)
             sFpImgTrg: str = self.dicTrgImgType["blur"]["sFpImgTrg"]
             xEvalFocusBlur.SaveBlurImage(sFpImgTrg)
             print("done", flush=True)

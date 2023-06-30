@@ -199,6 +199,7 @@ __global__ void EvalFocusBlurModel1(
     const float fPixelPitch_mm,
     const float fFocalPlanePos_mm,
     const float fMMperDepthUnit,
+    const float fBackgroundDepth_mm,
     float *aResult)
 {
     const float fNaN = nanf("");
@@ -216,10 +217,10 @@ __global__ void EvalFocusBlurModel1(
     const int iIdxY1 = min(max(iTrgIdxY1, 0), t_iSizeY - 1);
 
     const int iTargetDepthPixelIndex = iIdxY1 * t_iRowStrideDepth + iIdxX1 * t_iChanCntDepth;
-    const float fTrgDepth_mm = fMMperDepthUnit * aDepth[iTargetDepthPixelIndex];
-    const bool bValidTargetDepth = fTrgDepth_mm > 1e-4;
+    const float fTrgDepth_du = aDepth[iTargetDepthPixelIndex];
+    const float fTrgDepth_mm = (fTrgDepth_du < 1e-6 ? fBackgroundDepth_mm : fMMperDepthUnit * fTrgDepth_du);
 
-    const bool bValidSrcIdx = (bValidTargetDepth && iTrgIdxX1 == iIdxX1 && iTrgIdxY1 == iIdxY1 && iTrgX == iX && iTrgY == iY);
+    const bool bValidSrcIdx = (iTrgIdxX1 == iIdxX1 && iTrgIdxY1 == iIdxY1 && iTrgX == iX && iTrgY == iY);
 
     const int iTargetImagePixelIndex = iIdxY1 * t_iRowStrideImage + iIdxX1 * t_iChanCntImage;
 
@@ -239,11 +240,10 @@ __global__ void EvalFocusBlurModel1(
             const int iIdxX2 = min(max(iIterIdxX2, 0), t_iSizeX - 1);
 
             const int iDepthPixelIndex = iIdxY2 * t_iRowStrideDepth + iIdxX2 * t_iChanCntDepth;
-            float fDepth_mm = fMMperDepthUnit * aDepth[iDepthPixelIndex];
+            const float fDepth_du = aDepth[iDepthPixelIndex];
+            const float fDepth_mm = (fDepth_du < 1e-6 ? fBackgroundDepth_mm : fMMperDepthUnit * fDepth_du);
 
-            const bool bValidDepth = fDepth_mm > 1e-4;
-
-            bool bValid = (bValidDepth && bValidY && iIterIdxX2 == iIdxX2);
+            bool bValid = (bValidY && iIterIdxX2 == iIdxX2);
 
             if (bValid)
             {
@@ -253,15 +253,11 @@ __global__ void EvalFocusBlurModel1(
                 float2 vRelPos = make_float2(float(iOffX), float(iOffY));
                 const float fRelPosRad_mm = fPixelPitch_mm * length(vRelPos);
 
-                const float fAiryDiskRad_mm = 0.5 * max(fPixelPitch_mm, abs((1.0 - fFocalPlanePos_mm * (1.0 / fFocalLength_mm - 1.0 / fDepth_mm))) * fApertureDia_mm);
-                const float fPixRadMin_mm = max(0.0, fRelPosRad_mm - 0.5 * fPixelPitch_mm);
-                const float fPixRadMax_mm = min(fAiryDiskRad_mm, fRelPosRad_mm + 0.5 * fPixelPitch_mm);
-                const float fRadRatio = max(0.0, (fPixRadMax_mm - fPixRadMin_mm) / fAiryDiskRad_mm);
-
-                const float fBandArea_mm2 = fPi * (fPixRadMax_mm * fPixRadMax_mm - fPixRadMin_mm * fPixRadMin_mm);
-                const float fPixPerBandArea = min(1.0, (fPixelPitch_mm * fPixelPitch_mm) / fBandArea_mm2);
-
-                const float fEnergyRatio = fRadRatio * fPixPerBandArea;
+                const float fAiryDiskRad_mm = 0.5 * max(1e-6, abs((1.0 - fFocalPlanePos_mm * (1.0 / fFocalLength_mm - 1.0 / fDepth_mm))) * fApertureDia_mm);
+                const float fAreaRatio = min(1.0, (fPixelPitch_mm * fPixelPitch_mm) / (fPi * fAiryDiskRad_mm * fAiryDiskRad_mm));
+                const float fX_mm = max(1e-6, fRelPosRad_mm) * fPi / fAiryDiskRad_mm;
+                const float fSinc = sin(fX_mm) / fX_mm;
+                const float fEnergyRatio = fAreaRatio * fSinc * fSinc;
 
                 fWeightSum += fEnergyRatio;
                 vImgValResult = vImgValResult + fEnergyRatio * vImgValAtRadius;

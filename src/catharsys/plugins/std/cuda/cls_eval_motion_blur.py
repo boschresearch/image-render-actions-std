@@ -164,7 +164,7 @@ class CEvalMotionBlur:
         caImage1 = cp.asarray(_imgImage1, dtype=cp.float32)
         caImage2 = cp.asarray(_imgImage2, dtype=cp.float32)
         caFlow = cp.asarray(_imgFlow, dtype=cp.float32)
-        caResult = cp.full((self._tiSizeXY[0], self._tiSizeXY[1], self._iImgChanCnt), 0.0, dtype=cp.float32)
+        caResult = cp.full((self._tiSizeXY[1], self._tiSizeXY[0], self._iImgChanCnt), 0.0, dtype=cp.float32)
 
         fFlowFactor: float = 1.0
         cfFlowFactor = cp.float32(fFlowFactor)

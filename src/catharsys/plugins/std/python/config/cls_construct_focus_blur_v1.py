@@ -52,6 +52,7 @@ class CConfigConstructFocusBlurModel1(CConfigBase):
         self._fPixelPitch_mm: float = None
         self._fFocalPlanePos_mm: float = None
         self._fMMperDepthUnit: float = None
+        self._fBackgroundDepth_mm: float = None
 
         if isinstance(_xSource, dict):
             self.FromDict(_xSource)
@@ -77,6 +78,7 @@ class CConfigConstructFocusBlurModel1(CConfigBase):
         self._fApertureDia_mm = convert.DictElementToFloat(self._dicCfg, "fApertureDia_mm")
         self._fPixelPitch_mm = convert.DictElementToFloat(self._dicCfg, "fPixelPitch_mm")
         self._fMMperDepthUnit = convert.DictElementToFloat(self._dicCfg, "fMMperDepthUnit")
+        self._fBackgroundDepth_mm = convert.DictElementToFloat(self._dicCfg, "fBackgroundDepth_mm", fDefault=1e6)
 
     # endif
 
@@ -152,6 +154,12 @@ class CConfigConstructFocusBlurModel1(CConfigBase):
     @property
     def fMMperDepthUnit(self) -> float:
         return self._fMMperDepthUnit
+
+    # enddef
+
+    @property
+    def fBackgroundDepth_mm(self) -> float:
+        return self._fBackgroundDepth_mm
 
     # enddef
 

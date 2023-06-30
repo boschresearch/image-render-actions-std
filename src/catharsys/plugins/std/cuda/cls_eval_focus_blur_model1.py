@@ -163,12 +163,13 @@ class CEvalFocusBlurModel1:
         _fPixelPitch_mm: float,
         _fFocalPlanePos_mm: float,
         _fMMperDepthUnit: float,
+        _fBackgroundDepth_mm: float,
     ):
         """Evaluate motion blur between two images using their optical flow."""
 
         caImage = cp.asarray(_imgImage, dtype=cp.float32)
         caDepth = cp.asarray(_imgDepth, dtype=cp.float32)
-        caResult = cp.full((self._tiSizeXY[0], self._tiSizeXY[1], self._iImgChanCnt), 0.0, dtype=cp.float32)
+        caResult = cp.full((self._tiSizeXY[1], self._tiSizeXY[0], self._iImgChanCnt), 0.0, dtype=cp.float32)
 
         tArgs = (
             caImage,
@@ -179,14 +180,11 @@ class CEvalFocusBlurModel1:
             cp.float32(_fPixelPitch_mm),
             cp.float32(_fFocalPlanePos_mm),
             cp.float32(_fMMperDepthUnit),
+            cp.float32(_fBackgroundDepth_mm),
             caResult,
         )
 
-        self._kernBlur(
-            self._tiBlockDimXY,
-            (self._iThreadCnt,),
-            tArgs
-        )
+        self._kernBlur(self._tiBlockDimXY, (self._iThreadCnt,), tArgs)
 
         self._aImageBlur = cp.asnumpy(caResult)
 
