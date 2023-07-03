@@ -2,7 +2,6 @@
 # -*- coding:utf-8 -*-
 ###
 # File: /do-tonemap.py
-# Created Date: Thursday, October 22nd 2020, 4:26:28 pm
 # Author: Christian Perwass
 # <LICENSE id="Apache-2.0">
 #
@@ -43,10 +42,10 @@ import catharsys.util.config as cathcfg
 import catharsys.util.path as cathpath
 import catharsys.plugins.std
 
-from catharsys.plugins.std.python.config.cls_anytruth_construct_flow_v1 import CConfigAnytruthConstructFlow1
+from catharsys.plugins.std.python.config.cls_construct_motion_blur_v1 import CConfigConstructMotionBlur1
 
 print("Initializing CUDA...", flush=True)
-from catharsys.plugins.std.cuda.cls_eval_flow_ground_truth import CEvalFlowGroundTruth
+from catharsys.plugins.std.cuda.cls_eval_motion_blur import CEvalMotionBlur
 
 print("done", flush=True)
 
@@ -56,7 +55,9 @@ import cv2
 
 
 ################################################################################
-class CConstructFlow:
+class CConstructMotionBlur:
+
+    ################################################################################
 
     ################################################################################
 
@@ -68,46 +69,25 @@ class CConstructFlow:
 
     # enddef
 
-    @property
-    def iChX(self) -> int:
-        return self._iChX
-
-    # enddef
-
-    @property
-    def iChY(self) -> int:
-        return self._iChY
-
-    # enddef
-
-    @property
-    def iChZ(self) -> int:
-        return self._iChZ
-
-    # enddef
-
     ################################################################################
     def __init__(self):
         # Constants
-        self._iChX: int = 2
-        self._iChY: int = 1
-        self._iChZ: int = 0
 
         # Define output types and formats
         self._dicTrgImgType: dict = {
-            "flow": {"sFolder": ".", "sExt": ".exr"},
+            "blur": {"sFolder": ".", "sExt": ".png"},
             # "preview": {"sFolder": "Preview", "sExt": ".png"},
             # "debug": {"sFolder": "_debug", "sExt": ".png"},
         }
 
-        ################################################################################
         # Member variables
         self.xPrjCfg: CProjectConfig = None
         self.dicConfig: dict = None
         self.dicData: dict = None
+
         self.sPathTrgMain: str = None
-        self.pathSrcLocalPos3d: Path = None
-        self.pathSrcObjIdx: Path = None
+        self.pathSrcFlow: Path = None
+        self.pathSrcImage: Path = None
         self.dicPathTrgAct: dict = None
         self.dicActDtiToName: dict = None
         self.lActions: list = None
@@ -154,7 +134,28 @@ class CConstructFlow:
             print("Error loading image: {0}".format(_pathImage.as_posix()))
         # endif
 
-        return imgX
+        if len(imgX.shape) == 2:
+            return imgX
+
+        elif len(imgX.shape) == 3:
+            if imgX.shape[2] == 1:
+                return imgX
+            elif imgX.shape[2] == 3:
+                return imgX[:, :, [2, 1, 0]]
+            elif imgX.shape[2] == 4:
+                return imgX[:, :, [2, 1, 0, 3]]
+            else:
+                raise RuntimeError(
+                    f"Expect image with 1, 3 or 4 channels, but given image has {(imgX.shape[2])}: {(_pathImage.as_posix())}"
+                )
+            # endif
+
+        else:
+            raise RuntimeError(
+                f"Expect image as 2d or 3d array, but given image has {(len(imgX.shape))} dimensions: {(_pathImage.as_posix())}"
+            )
+
+        # endif
 
     # enddef
 
@@ -170,7 +171,7 @@ class CConstructFlow:
 
         # Define expected type names
         sRenderTypeListDti = "blender/render/output-list:1"
-        sConstructFlowDti = "blender/anytruth/construct/flow:1"
+        sConstructMotionBlurDti = "blender/construct/motion-blur:1"
 
         lRndTypeList = cathcfg.GetDataBlocksOfType(self.dicData, sRenderTypeListDti)
         if len(lRndTypeList) == 0:
@@ -187,17 +188,17 @@ class CConstructFlow:
         # dicRndOutLocalPos3d = self._GetRndOutDict(_sSubType="anytruth/local-pos3d:1", _lRndOutTypes=lRndOutTypes)
         # dicRndOutObjIdx = self._GetRndOutDict(_sSubType="anytruth/object-idx:1", _lRndOutTypes=lRndOutTypes)
 
-        lCFT = cathcfg.GetDataBlocksOfType(self.dicData, sConstructFlowDti)
-        if len(lCFT) == 0:
+        lCMB = cathcfg.GetDataBlocksOfType(self.dicData, sConstructMotionBlurDti)
+        if len(lCMB) == 0:
             raise Exception(
-                "No label construction configuration of type compatible to '{0}' given".format(sConstructFlowDti)
+                "No label construction configuration of type compatible to '{0}' given".format(sConstructMotionBlurDti)
             )
         # endif
-        xCFT = CConfigAnytruthConstructFlow1(lCFT[0])
+        xCMB = CConfigConstructMotionBlur1(lCMB[0])
 
         # Initialize variable which will contain class instance of flow eval algo.
         # This can only be initialized once the image size is known.
-        xEvalFlow: CEvalFlowGroundTruth = None
+        xEvalBlur: CEvalMotionBlur = None
 
         cathcfg.StoreDictValuesInObject(
             self,
@@ -233,21 +234,20 @@ class CConstructFlow:
             sMsgNotFound="Render path not given for action {sKey}",
         )
 
-        self.pathSrcLocalPos3d = xCFT.pathLocalPos3d
-        if not self.pathSrcLocalPos3d.is_absolute():
+        self.pathSrcFlow = xCMB.pathFlow
+        if not self.pathSrcFlow.is_absolute():
             # Get the path to the local position render
-            self.pathSrcLocalPos3d = cathpath.MakeNormPath((sPathRenderAct, self.pathSrcLocalPos3d))
+            self.pathSrcFlow = cathpath.MakeNormPath((sPathRenderAct, self.pathSrcFlow))
         # endif
 
-        self.pathSrcObjIdx = xCFT.pathObjIdx
-        if not self.pathSrcObjIdx.is_absolute():
-            # Get the path to the object index render
-            self.pathSrcObjIdx = cathpath.MakeNormPath((sPathRenderAct, self.pathSrcObjIdx))
+        self.pathSrcImage = xCMB.pathImage
+        if not self.pathSrcImage.is_absolute():
+            self.pathSrcImage = cathpath.MakeNormPath((sPathRenderAct, self.pathSrcImage))
         # endif
 
         ###################################################################################
-        print("\nLocal pos. 3d source main path: {0}".format(self.pathSrcLocalPos3d.as_posix()))
-        print("\nObject index source main path: {0}".format(self.pathSrcObjIdx.as_posix()))
+        print("\nFlow source main path: {0}".format(self.pathSrcFlow.as_posix()))
+        print("\nImage source main path: {0}".format(self.pathSrcImage.as_posix()))
         print("\nMain output path: {0}".format(self.sPathTrgMain))
         print("\nFirst rendered frame: {0}".format(self.iFrameFirst))
         print("Last rendered frame: {0}".format(self.iFrameLast))
@@ -282,58 +282,38 @@ class CConstructFlow:
             iTrgFrame += self.iFrameStep
             iTrgFrameIdx += 1
 
-            iFlowFrame1: int = None
-            iFlowFrame2: int = None
+            iImageFrame1: int = None
+            iImageFrame2: int = None
 
-            if xCFT.iFrameDelta > 0:
-                iFlowFrame1 = iTrgFrame
-                iFlowFrame2 = iTrgFrame + xCFT.iFrameDelta
-            elif xCFT.iFrameDelta < 0:
-                iFlowFrame1 = iTrgFrame - xCFT.iFrameDelta
-                iFlowFrame2 = iTrgFrame
-            else:
-                raise CAnyError_Message(sMsg="Flow frame delta must not be zero.")
-            # endif
+            iImageFrame1 = iTrgFrame
+            iImageFrame2 = iTrgFrame + 1
 
             print("")
-            print(f"Start processing flow for frames {iFlowFrame1} -> {iFlowFrame2}...", flush=True)
+            print(f"Start processing motion blur for frames {iImageFrame1} -> {iImageFrame2}...", flush=True)
 
             ###################################################################
-            sTrgFrameName = "Frame_{0:04d}".format(iFlowFrame1)
-            sFrameName1 = "Frame_{0:04d}".format(iFlowFrame1)
-            sFrameName2 = "Frame_{0:04d}".format(iFlowFrame2)
-            sFileImgSrc1 = "{0}.exr".format(sFrameName1)
-            sFileImgSrc2 = "{0}.exr".format(sFrameName2)
+            sTrgFrameName = "Frame_{0:04d}".format(iImageFrame1)
+            sFrameName1 = "Frame_{0:04d}".format(iImageFrame1)
+            sFrameName2 = "Frame_{0:04d}".format(iImageFrame2)
+            sFileImgSrc1 = f"{sFrameName1}{xCMB.sImageFileExt}"
+            sFileImgSrc2 = f"{sFrameName2}{xCMB.sImageFileExt}"
+            sFileFlowSrc = f"{sFrameName1}.exr"
 
-            pathImgLocalPos3d1 = cathpath.MakeNormPath((self.pathSrcLocalPos3d, sFileImgSrc1))
-            if not pathImgLocalPos3d1.exists():
-                print(
-                    f"Local pos. 3d frame '{iFlowFrame1}' does not exist at {(pathImgLocalPos3d1.as_posix())}. Skipping..."
-                )
+            pathFileImg1 = cathpath.MakeNormPath((self.pathSrcImage, sFileImgSrc1))
+            if not pathFileImg1.exists():
+                print(f"Image frame '{iImageFrame1}' does not exist at {(pathFileImg1.as_posix())}. Skipping...")
                 continue
             # endif
 
-            pathImgObjIdx1 = cathpath.MakeNormPath((self.pathSrcObjIdx, sFileImgSrc1))
-            if not pathImgObjIdx1.exists():
-                print(
-                    f"Object index frame '{iFlowFrame1}' does not exist at {(pathImgObjIdx1.as_posix())}. Skipping..."
-                )
+            pathFileImg2 = cathpath.MakeNormPath((self.pathSrcImage, sFileImgSrc2))
+            if not pathFileImg2.exists():
+                print(f"Image frame '{iImageFrame2}' does not exist at {(pathFileImg2.as_posix())}. Skipping...")
                 continue
             # endif
 
-            pathImgLocalPos3d2 = cathpath.MakeNormPath((self.pathSrcLocalPos3d, sFileImgSrc2))
-            if not pathImgLocalPos3d2.exists():
-                print(
-                    f"Local pos. 3d frame '{iFlowFrame2}' does not exist at {(pathImgLocalPos3d2.as_posix())}. Skipping..."
-                )
-                continue
-            # endif
-
-            pathImgObjIdx2 = cathpath.MakeNormPath((self.pathSrcObjIdx, sFileImgSrc2))
-            if not pathImgObjIdx2.exists():
-                print(
-                    f"Object index frame '{iFlowFrame2}' does not exist at {(pathImgObjIdx2.as_posix())}. Skipping..."
-                )
+            pathFileFlow = cathpath.MakeNormPath((self.pathSrcFlow, sFileFlowSrc))
+            if not pathFileFlow.exists():
+                print(f"Flow frame '{iImageFrame1}' does not exist at {(pathFileFlow.as_posix())}. Skipping...")
                 continue
             # endif
 
@@ -361,52 +341,39 @@ class CConstructFlow:
                 continue
             # endif
 
-            # Load local pos 3d image
+            # Load images
             print("Loading images...", flush=True)
-            imgLocalPos3d1 = self._LoadImage(pathImgLocalPos3d1)
-            if imgLocalPos3d1 is None:
+            imgImage1 = self._LoadImage(pathFileImg1)
+            if imgImage1 is None:
                 continue
             # endif
 
-            imgLocalPos3d2 = self._LoadImage(pathImgLocalPos3d2)
-            if imgLocalPos3d2 is None:
+            imgImage2 = self._LoadImage(pathFileImg2)
+            if imgImage2 is None:
                 continue
             # endif
 
-            imgObjIdx1 = self._LoadImage(pathImgObjIdx1)
-            if imgObjIdx1 is None:
-                continue
-            # endif
-
-            imgObjIdx2 = self._LoadImage(pathImgObjIdx2)
-            if imgObjIdx2 is None:
+            imgFlow = self._LoadImage(pathFileFlow)
+            if imgFlow is None:
                 continue
             # endif
             print("done.", flush=True)
 
-            iPosRows, iPosCols, iPosChnl = imgLocalPos3d1.shape
-            iObjIdxRows, iObjIdxCols, iObjIdxChnl = imgObjIdx1.shape
+            iImgRows, iImgCols = imgImage1.shape[0:2]
+            iFlowRows, iFlowCols = imgFlow.shape[0:2]
 
-            if iObjIdxRows != iPosRows or iObjIdxCols != iPosCols:
+            if iFlowRows != iImgRows or iFlowCols != iImgCols:
                 print(
-                    "Error: local 3d position and object index images have different sizes: "
-                    f"[{iPosCols}, {iPosRows}] vs [{iObjIdxCols}, {iObjIdxRows}]"
+                    "Error: image and flow have different sizes: "
+                    f"[{iImgCols}, {iImgRows}] vs [{iFlowCols}, {iFlowRows}]"
                 )
                 continue
             # endif
 
-            if imgLocalPos3d1.shape != imgLocalPos3d2.shape:
+            if imgImage1.shape != imgImage2.shape:
                 print(
-                    f"Error: local position images for frames {iFlowFrame1} and {iFlowFrame2} have different sizes: "
-                    f"{imgLocalPos3d1.shape} vs {imgLocalPos3d2.shape}"
-                )
-                continue
-            # endif
-
-            if imgObjIdx1.shape != imgObjIdx2.shape:
-                print(
-                    f"Error: object index images for frames {iFlowFrame1} and {iFlowFrame2} have different sizes: "
-                    f"{imgObjIdx1.shape} vs {imgObjIdx2.shape}"
+                    f"Error: images for frames {iImageFrame1} and {iImageFrame2} have different sizes: "
+                    f"{imgImage1.shape} vs {imgImage2.shape}"
                 )
                 continue
             # endif
@@ -414,35 +381,26 @@ class CConstructFlow:
             ################################################################################
             # Evaluate flow
 
-            # Only initialize flow algo kernel once.
+            # Only initialize blur algo kernel once.
             # Assumes that all images have the same size.
-            if xEvalFlow is None:
+            if xEvalBlur is None:
                 print("Compiling CUDA kernel...", flush=True)
-                xEvalFlow = CEvalFlowGroundTruth(
-                    _tiImageShape=imgLocalPos3d1.shape,
-                    _tiSearchRadiusXY=xCFT.tSearchRadiusXY,
-                    _tiStartXY=xCFT.tStartXY,
-                    _tiRangeXY=xCFT.tRangeXY,
+                xEvalBlur = CEvalMotionBlur(
+                    _tiImageShape=imgImage1.shape,
+                    _tiFilterRadiusXY=xCMB.tFilterRadiusXY,
+                    _tiStartXY=xCMB.tStartXY,
+                    _tiRangeXY=xCMB.tRangeXY,
                 )
                 print("done")
             # endif
 
-            print("Evaluate flow...", flush=True)
-            xEvalFlow.Eval(
-                _imgPos1=imgLocalPos3d1,
-                _imgPos2=imgLocalPos3d2,
-                _imgObjIdx1=imgObjIdx1,
-                _imgObjIdx2=imgObjIdx2,
-                _iChObjIdx=2,
-                _iChInstId=0,
-                _bSphericalCS=False,
-                _tRgbIdx=(2, 1, 0),
-            )
+            print("Evaluate motion blur...", flush=True)
+            xEvalBlur.Eval(_imgImage1=imgImage1, _imgImage2=imgImage2, _imgFlow=imgFlow)
             print("done", flush=True)
 
-            print("Saving flow image...", flush=True)
-            sFpImgTrg: str = self.dicTrgImgType["flow"]["sFpImgTrg"]
-            xEvalFlow.SaveFlowImage(sFpImgTrg)
+            print("Saving motion blur image...", flush=True)
+            sFpImgTrg: str = self.dicTrgImgType["blur"]["sFpImgTrg"]
+            xEvalBlur.SaveBlurImage(sFpImgTrg)
             print("done", flush=True)
         # endwhile iTrgFrame
 

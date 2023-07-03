@@ -331,7 +331,6 @@ __global__ void EvalFlow(const float *aPos1, const float *aPos2, const int *aObj
 
                 if (pbValid[i] && pbValid[iNext])
                 {
-                    // Evaluate Barycentric Coordinates
                     const float3 vB1 = vP1 - vPosCtr;
                     const float3 vB2 = vP2 - vPosCtr;
                     const float2 vC = make_float2(dot(vVecTrg, vB1), dot(vVecTrg, vB2));
@@ -343,8 +342,6 @@ __global__ void EvalFlow(const float *aPos1, const float *aPos2, const int *aObj
                     {
                         const float fL1 = (fB22 * vC.x - fB12 * vC.y) / fDetB;
                         const float fL2 = (fB11 * vC.y - fB12 * vC.x) / fDetB;
-                        // It seems we do not always find the best central pixel.
-                        // Therefore, fL1+fL2 can be greater than 1. Results look good nonetheless.
                         if (fL1 >= 0.0 && fL2 >= 0.0) // && (1.0 - fL1 - fL2) >= -1e-4)
                         {
                             vSubPix = fL1 * make_float2(float(piH[i]), float(piV[i])) + fL2 * make_float2(float(piH[iNext]), float(piV[iNext]));
