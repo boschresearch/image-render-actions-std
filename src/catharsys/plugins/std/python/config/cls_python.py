@@ -36,11 +36,6 @@ from anybase.cls_any_error import CAnyError_Message
 
 #####################################################################
 class CPythonConfig:
-
-    _pathPython: Path = None
-    _sCondaEnv: str = None
-    _sSystem: str = None
-
     @property
     def sSystem(self):
         return self._sSystem
@@ -88,6 +83,9 @@ class CPythonConfig:
 
     #####################################################################
     def __init__(self, *, xPythonPath=None, sCondaEnv=None):
+        self._pathPython: Path = None
+        self._sCondaEnv: str = None
+        self._sSystem: str = None
 
         if xPythonPath is not None:
             self._pathPython = cathpath.MakeNormPath(xPythonPath)
@@ -106,7 +104,6 @@ class CPythonConfig:
 
     #####################################################################
     def _GetCondaActCmd(self):
-
         lCmd = []
         if self.bIsWindows:
             pathHook = Path(os.path.expanduser("~/Anaconda3/shell/condabin/conda-hook.ps1"))
@@ -150,7 +147,6 @@ class CPythonConfig:
         funcPreStart: Optional[Callable[[list], None]] = None,
         funcPostStart: Optional[Callable[[list, int], None]] = None,
     ):
-
         lCmds = []
         sCwd = None
 
