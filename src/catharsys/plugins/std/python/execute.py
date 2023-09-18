@@ -37,6 +37,7 @@ else:
 import shutil
 import platform
 from pathlib import Path
+from typing import Optional
 
 import catharsys.plugins.std
 import catharsys.util.version as cathversion
@@ -46,6 +47,7 @@ from catharsys.config.cls_project import CProjectConfig
 from anybase import path as anypath
 from anybase import assertion, convert, debug, config
 from anybase.cls_any_error import CAnyError, CAnyError_Message, CAnyError_TaskMessage
+from anybase.cls_process_handler import CProcessHandler
 
 from catharsys.config.cls_exec_lsf import CConfigExecLsf
 from .config.cls_python import CPythonConfig
@@ -72,6 +74,8 @@ def StartJob(*, xPrjCfg: CProjectConfig, dicExec: dict, dicArgs: dict):
             raise CAnyError_Message(sMsg="Blender job argument '{}' missing".format(str(xEx)))
         # endtry
 
+        xProcHandler: CProcessHandler = dicArgs.get("xProcessHandler")
+
         if sJobNameLong is None:
             sJobNameLong = sJobName
         # endif
@@ -87,7 +91,13 @@ def StartJob(*, xPrjCfg: CProjectConfig, dicExec: dict, dicArgs: dict):
         # top DTI, we should interpret it as "std" if it is not overwritten by the
         # "__platform__" block.
         if xExec.sType == "std" or xExec.sType == "*":
-            _StartPythonScript(xPythonCfg=xPythonCfg, pathJobConfig=pathJobConfig, bPrintOutput=True, dicDebug=dicDebug)
+            _StartPythonScript(
+                xPythonCfg=xPythonCfg,
+                pathJobConfig=pathJobConfig,
+                bPrintOutput=True,
+                dicDebug=dicDebug,
+                xProcHandler=xProcHandler,
+            )
 
         elif xExec.sType == "lsf":
             _LsfStartPythonScript(
@@ -97,6 +107,7 @@ def StartJob(*, xPrjCfg: CProjectConfig, dicExec: dict, dicArgs: dict):
                 sJobNameLong=sJobNameLong,
                 xLsfCfg=xLsf,
                 bPrintOutput=True,
+                xProcHandler=xProcHandler,
             )
         else:
             sExecFile = "?"
@@ -125,7 +136,12 @@ def StartJob(*, xPrjCfg: CProjectConfig, dicExec: dict, dicArgs: dict):
 ################################################################################################
 # Start python script with standard suprocess call
 def _StartPythonScript(
-    *, xPythonCfg: CPythonConfig, pathJobConfig: Path, bPrintOutput: bool = True, dicDebug: dict = None
+    *,
+    xPythonCfg: CPythonConfig,
+    pathJobConfig: Path,
+    bPrintOutput: bool = True,
+    dicDebug: dict = None,
+    xProcHandler: Optional[CProcessHandler] = None,
 ):
     xScript = res.files(catharsys.plugins.std).joinpath("scripts").joinpath("run-action.py")
     with res.as_file(xScript) as pathScript:
@@ -184,8 +200,17 @@ def _StartPythonScript(
 
         # endif
 
+        if xProcHandler is not None:
+            xProcHandler.AddHandlerPostStart(funcPostStart)
+        else:
+            xProcHandler = CProcessHandler(_funcPostStart=funcPostStart)
+        # endif
+
         iExitCode = xPythonCfg.ExecPython(
-            lArgs=lScriptArgs, bDoPrint=bPrintOutput, bDoPrintOnError=bPrintOutput, funcPostStart=funcPostStart
+            lArgs=lScriptArgs,
+            bDoPrint=bPrintOutput,
+            bDoPrintOnError=bPrintOutput,
+            xProcHandler=xProcHandler,
         )
     # endwith
 
@@ -205,6 +230,7 @@ def _LsfStartPythonScript(
     sJobNameLong: str,
     xLsfCfg: CConfigExecLsf,
     bPrintOutput: bool = True,
+    xProcHandler: Optional[CProcessHandler] = None,
 ):
     # Only supported on Linux platforms
     if platform.system() != "Linux":
@@ -267,7 +293,12 @@ def _LsfStartPythonScript(
     print("Submitting job '{0}'...".format(sJobNameLong))
 
     bOk, lStdOut = cathlsf.Execute(
-        _sJobName=sJobName, _xCfgExecLsf=xLsfCfg, _sScript=sScript, _bDoPrint=True, _bDoPrintOnError=True
+        _sJobName=sJobName,
+        _xCfgExecLsf=xLsfCfg,
+        _sScript=sScript,
+        _bDoPrint=True,
+        _bDoPrintOnError=True,
+        _xProcHandler=xProcHandler,
     )
 
     return {"bOK": bOk, "sOutput": "\n".join(lStdOut)}
