@@ -290,7 +290,7 @@ def _LsfStartPythonScript(
         python {sScriptFile} -- {sScriptPars}
     """
 
-    print("Submitting job '{0}'...".format(sJobNameLong))
+    # print("Submitting job '{0}'...".format(sJobNameLong))
 
     bOk, lStdOut = cathlsf.Execute(
         _sJobName=sJobName,
