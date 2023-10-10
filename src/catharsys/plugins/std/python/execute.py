@@ -27,7 +27,7 @@
 import sys
 from xml.etree.ElementPath import xpath_tokenizer
 
-from catharsys.plugins.std.python.config.cls_python import CPythonConfig
+from anybase.cls_python import CPythonConfig
 
 if sys.version_info < (3, 10):
     import importlib_resources as res
@@ -48,9 +48,9 @@ from anybase import path as anypath
 from anybase import assertion, convert, debug, config
 from anybase.cls_any_error import CAnyError, CAnyError_Message, CAnyError_TaskMessage
 from anybase.cls_process_handler import CProcessHandler
+from anybase.cls_python import CPythonConfig
 
 from catharsys.config.cls_exec_lsf import CConfigExecLsf
-from .config.cls_python import CPythonConfig
 from .config.cls_exec_python import CConfigExecPython
 
 from catharsys.decs.decorator_ep import EntryPoint
