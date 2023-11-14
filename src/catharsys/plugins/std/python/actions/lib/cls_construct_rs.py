@@ -29,12 +29,13 @@
 import os
 import math
 import numpy as np
+from pathlib import Path
 
 # need to enable OpenExr explicitly
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 import cv2
 
-
+import enum
 from timeit import default_timer as timer
 
 from anybase import assertion
@@ -51,8 +52,17 @@ import catharsys.util.path as cathpath
 
 
 ################################################################################
-class CConstructRS:
+class ERndOutType(enum.Enum):
+    NONE = enum.auto()
+    IMAGE = enum.auto()
+    POS3D = enum.auto()
 
+
+# endclass
+
+
+################################################################################
+class CConstructRS:
     xPrjCfg: CProjectConfig = None
 
     dicConfig: dict = None
@@ -75,6 +85,10 @@ class CConstructRS:
     iSrcReadOutsPerRender: int = None
     dicSrcExp: dict = None
     fSrcExpPerLine: float = None
+
+    iChX: int = 2
+    iChY: int = 1
+    iChZ: int = 0
 
     ################################################################################
     def __init__(self):
@@ -109,14 +123,16 @@ class CConstructRS:
         self.dicData = cathcfg.GetDictValue(self.dicConfig, "mData", dict, sWhere="action configuration")
 
         # Define expected type names
-        sConstructDti = "blender/construct/rs/type/*:1"
-        sImgTypDti = "blender/construct/rs/input-id:1"
-        sRenderType = "blender/render/output/image:1"
-        sRenderTypeList = "blender/render/output-list:1"
+        sDtiConstruct = "blender/construct/rs/type/*:1"
+        sDtiImgType = "blender/construct/rs/input-id:1"
+        sDtiRenderOutput = "blender/render/output/*:1"
+        sDtiRenderOutputList = "blender/render/output-list:1"
 
-        lRndTypeList = cathcfg.GetDataBlocksOfType(self.dicData, sRenderTypeList)
+        lRndTypeList = cathcfg.GetDataBlocksOfType(self.dicData, sDtiRenderOutputList)
         if len(lRndTypeList) == 0:
-            raise Exception("No render output configuration of type compatible to '{0}' given".format(sRenderTypeList))
+            raise Exception(
+                "No render output configuration of type compatible to '{0}' given".format(sDtiRenderOutputList)
+            )
         # endif
         dicRndOutList = lRndTypeList[0]
         lRndOutTypes = cathcfg.GetDictValue(dicRndOutList, "lOutputs", list)
@@ -124,38 +140,42 @@ class CConstructRS:
             raise Exception("No render output types defined")
         # endif
 
-        # Look for 'image' render output type
-        dicRndOut = None
-        for dicOut in lRndOutTypes:
-            dicRes = cathcfg.CheckConfigType(dicOut, sRenderType)
-            if dicRes["bOK"] is True:
-                dicRndOut = dicOut
-                break
-            # endif
-        # endfor
-
-        if dicRndOut is None:
-            raise Exception("No render output type 'image' specified in configuration")
+        if len(lRndOutTypes) > 1:
+            raise Exception("Currently only a single output type is allowed for constructing rolling shutter")
         # endif
 
-        dicComp = cathcfg.GetDictValue(dicRndOut, "mCompositor", dict)
-        cathcfg.AssertConfigType(dicComp, "/catharsys/blender/compositor:1")
-        xComp = CConfigCompositor(xPrjCfg=self.xPrjCfg, dicData=dicComp)
+        if len(lRndOutTypes) == 0:
+            raise Exception("No render output types defined")
+        # endif
 
-        lCtr: list[dict] = cathcfg.GetDataBlocksOfType(self.dicData, sConstructDti)
+        dicRndOut = lRndOutTypes[0]
+        dicRes = cathcfg.CheckConfigType(dicRndOut, sDtiRenderOutput)
+        if dicRes["bOK"] is False:
+            raise RuntimeError("Invalid render output type")
+        # endif
+
+        lSpecificRenderType: list[str] = dicRes["lCfgType"][4:]
+
+        eSrcRndOutType = ERndOutType.NONE
+        if lSpecificRenderType[0] == "image":
+            eSrcRndOutType = ERndOutType.IMAGE
+        elif lSpecificRenderType[0] == "anytruth" and lSpecificRenderType[1] == "pos3d":
+            eSrcRndOutType = ERndOutType.POS3D
+        else:
+            sSpecRndOutType = "/".join(lSpecificRenderType)
+            raise RuntimeError(
+                f"Unsupported source render output type '{sSpecRndOutType}' for rolling shutter construction."
+            )
+        # endif
+
+        lCtr: list[dict] = cathcfg.GetDataBlocksOfType(self.dicData, sDtiConstruct)
         if len(lCtr) == 0:
-            raise Exception("No construct configuration of type compatible to '{0}' given.".format(sConstructDti))
+            raise Exception("No construct configuration of type compatible to '{0}' given.".format(sDtiConstruct))
         # endif
         dicConstruct: dict = lCtr[0]
         dicConstructDti: dict = cathcfg.SplitDti(cathcfg.GetDictValue(dicConstruct, "sDTI", str))
         lConstructType: list[str] = dicConstructDti["lType"][5:]
         iReadOutsPerRender: int = cathcfg.GetDictValue(dicConstruct, "iReadOutsPerRender", int, xDefault=1)
-
-        lImgFolder: list[str] = cathcfg.GetDataBlocksOfType(self.dicData, sImgTypDti)
-        if len(lImgFolder) == 0:
-            raise Exception("No image type configuration of type compatible to '{0}' given.".format(sImgTypDti))
-        # endif
-        sImageFolder = lImgFolder[0]
 
         # Get the name of the render action this action depends on
         sRenderActName = cathcfg.GetDictValue(
@@ -181,23 +201,48 @@ class CConstructRS:
         # endif
         dicAnyCam = cathfile.LoadJson(sFpAnyCamCfg)
 
-        # Get compositor file format for given folder name
-        dicCompFo = xComp.GetOutputsByFolderName()
-        lImageFolderFo = cathcfg.GetDictValue(
-            dicCompFo,
-            sImageFolder,
-            list,
-            xDefault=[],
-            sWhere="compositor file format by folder",
-        )
-        if len(lImageFolderFo) == 0:
-            raise Exception("Compositor configuration does not contain an output of type '{0}'.".format(sImageFolder))
-        elif len(lImageFolderFo) > 1:
-            raise Exception(
-                "Compositor configuration contains more than one output to the folder '{0}'.".format(sImageFolder)
+        ###############################################################################
+        # Image RS setup
+        if eSrcRndOutType == ERndOutType.IMAGE:
+            dicComp = cathcfg.GetDictValue(dicRndOut, "mCompositor", dict)
+            cathcfg.AssertConfigType(dicComp, "/catharsys/blender/compositor:1")
+            xComp = CConfigCompositor(xPrjCfg=self.xPrjCfg, dicData=dicComp)
+
+            lImgFolder: list[str] = cathcfg.GetDataBlocksOfType(self.dicData, sDtiImgType)
+            if len(lImgFolder) == 0:
+                raise Exception("No image type configuration of type compatible to '{0}' given.".format(sDtiImgType))
+            # endif
+            sImageFolder = lImgFolder[0]
+
+            # Get compositor file format for given folder name
+            dicCompFo = xComp.GetOutputsByFolderName()
+            lImageFolderFo = cathcfg.GetDictValue(
+                dicCompFo,
+                sImageFolder,
+                list,
+                xDefault=[],
+                sWhere="compositor file format by folder",
             )
+            if len(lImageFolderFo) == 0:
+                raise Exception(
+                    "Compositor configuration does not contain an output of type '{0}'.".format(sImageFolder)
+                )
+            elif len(lImageFolderFo) > 1:
+                raise Exception(
+                    "Compositor configuration contains more than one output to the folder '{0}'.".format(sImageFolder)
+                )
+            # endif
+            dicImageFolderFo = lImageFolderFo[0]
+
+        elif eSrcRndOutType == ERndOutType.POS3D:
+            dicImageFolderFo = {
+                "sContentType": "pos3d",
+                "sFolder": "AT_Pos3d_Raw",
+                "sFileExt": ".exr",
+            }
+        else:
+            raise RuntimeError(f"Unsupported source render output type '{(str(eSrcRndOutType))}")
         # endif
-        dicImageFolderFo = lImageFolderFo[0]
 
         ###################################################################################
         # Prepare image capture data for processing
@@ -307,7 +352,7 @@ class CConstructRS:
                     # "": ,
                 }
             )
-            sConstructDti = "construct-proc/rs/type/single:1"
+            sDtiConstruct = "construct-proc/rs/type/single:1"
 
         elif lConstructType[0] == "consecutive":
             lTrgExpPerLine = cathcfg.GetDictValue(dicExposure, "lExpPerLine", list, sWhere="exposure configuration")
@@ -390,33 +435,64 @@ class CConstructRS:
                 )
             # endfor
 
-            sConstructDti = "construct-proc/rs/type/consecutive:1"
+            sDtiConstruct = "construct-proc/rs/type/consecutive:1"
 
         else:
             raise RuntimeError("Unsupported rolling shutter construction type '{}'".format(lConstructType[0]))
         # endif
 
         # Create dirs for all render output of given id
-        if len(lTrgRsExp) == 1:
-            lPathTrgMain = [self.sPathTrgMain]
-            cathpath.CreateDir(self.sPathTrgMain)
-            cathcfg.Save(
-                (self.sPathTrgMain, "ConstructCfg.json"),
-                lConstructCfg[0],
-                sDTI=sConstructDti,
-            )
-        else:
-            lPathTrgMain = []
-            for iRsIdx in range(len(lTrgRsExp)):
-                sPath = os.path.join(self.sPathTrgMain, str(iRsIdx))
-                lPathTrgMain.append(sPath)
-                cathpath.CreateDir(sPath)
+        if eSrcRndOutType == ERndOutType.IMAGE:
+            if len(lTrgRsExp) == 1:
+                lPathTrgMain = [self.sPathTrgMain]
+                cathpath.CreateDir(self.sPathTrgMain)
                 cathcfg.Save(
-                    (sPath, "ConstructCfg.json"),
-                    lConstructCfg[iRsIdx],
-                    sDTI=sConstructDti,
+                    (self.sPathTrgMain, "ConstructCfg.json"),
+                    lConstructCfg[0],
+                    sDTI=sDtiConstruct,
                 )
-            # endfor
+            else:
+                lPathTrgMain = []
+                for iRsIdx in range(len(lTrgRsExp)):
+                    sPath = os.path.join(self.sPathTrgMain, str(iRsIdx))
+                    lPathTrgMain.append(sPath)
+                    cathpath.CreateDir(sPath)
+                    cathcfg.Save(
+                        (sPath, "ConstructCfg.json"),
+                        lConstructCfg[iRsIdx],
+                        sDTI=sDtiConstruct,
+                    )
+                # endfor
+            # endif
+
+        elif eSrcRndOutType == ERndOutType.POS3D:
+            pathTrgMain = Path(self.sPathTrgMain)
+            pathTrgMain = pathTrgMain.parent / "AT_Depth"
+
+            if len(lTrgRsExp) == 1:
+                lPathTrgMain = [pathTrgMain.as_posix()]
+                pathTrgMain.mkdir(exist_ok=True, parents=True)
+                cathcfg.Save(
+                    (pathTrgMain.as_posix(), "ConstructCfg.json"),
+                    lConstructCfg[0],
+                    sDTI=sDtiConstruct,
+                )
+
+            else:
+                lPathTrgMain = []
+                for iRsIdx in range(len(lTrgRsExp)):
+                    pathTrgRs = pathTrgMain / str(iRsIdx)
+                    pathTrgRs.mkdir(exist_ok=True, parents=True)
+                    lPathTrgMain.append(pathTrgRs.as_posix())
+                    cathcfg.Save(
+                        (pathTrgRs.as_posix(), "ConstructCfg.json"),
+                        lConstructCfg[0],
+                        sDTI=sDtiConstruct,
+                    )
+                # endfor
+            # endif
+        else:
+            raise RuntimeError("Unsupported source render output type")
         # endif
 
         # Loop over frames
@@ -467,7 +543,7 @@ class CConstructRS:
             for iRsIdx in range(iRsCnt):
                 if sContentType == "image":
                     lImgTrg.append(np.zeros(lTrgImgSize, np.float32))
-                elif sContentType == "depth":
+                elif sContentType == "depth" or sContentType == "pos3d":
                     lImgTrg.append(np.zeros(lTrgImgSize, np.float64))
                 else:
                     raise Exception("Output content type '{0}' not supported.".format(sContentType))
@@ -551,14 +627,46 @@ class CConstructRS:
 
                     if self.bDoEval:
                         if bLoadImage is True:
-                            imgSrc = cv2.imread(
+                            imgSrc: np.ndarray = cv2.imread(
                                 sFpExpImg,
                                 cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH | cv2.IMREAD_UNCHANGED,
                             )
+
+                            if eSrcRndOutType == ERndOutType.POS3D:
+                                sRelPathExpImg = "{0}/Exp_{1:07d}.json".format(sImgSrcFolder, iExpStartScnFrame)
+                                sFpExpData = os.path.normpath(os.path.join(sPathRenderFrame, sRelPathExpImg))
+
+                                ###################################################################
+                                # Get pos3d raw info
+                                try:
+                                    print(f"Loading camera data from: {sFpExpData}")
+                                    dicPos3d = cathcfg.Load(
+                                        sFpExpData,
+                                        sDTI="/anytruth/render/pos3d/raw:1.1",
+                                    )
+
+                                except Exception as xEx:
+                                    raise CAnyError_Message(
+                                        sMsg=f"Error reading pos3d data for exposure frame {iExpStartScnFrame} "
+                                        f"of target frame {iTrgFrame}:\n{(str(xEx))}",
+                                        xChildEx=xEx,
+                                    )
+                                # endtry
+
+                                dicCamera: dict = dicPos3d.get("mCamera")
+                                if dicCamera is None:
+                                    raise RuntimeError(
+                                        "Error: no camera information available for frame {0}".format(iExpStartScnFrame)
+                                    )
+                                # endif
+
+                                ###################################################################
+
+                            # endif
+
                         # endif
 
                         for iRsIdx, xTrgRsExp in enumerate(lTrgRsExp):
-
                             if lValidRsLoop[iRsIdx] is False:
                                 continue
                             # endif
@@ -602,6 +710,33 @@ class CConstructRS:
                                 imgTrg[lTrgRoRows, :, 1] += np.square(imgSrcDepthMasked)
                                 imgTrg[lTrgRoRows, :, 2] += imgSrcDepthValidF
 
+                            elif sContentType == "pos3d":
+                                imgSrcPos3dData = imgSrc[lSrcRoRows, :, :]
+                                iSrcChnl: int = imgSrc.shape[2]
+                                aOrig = np.zeros(iSrcChnl)
+                                aOrig[[self.iChX, self.iChY, self.iChZ]] = np.array(dicCamera.get("lOrigin"))
+
+                                imgMask = np.logical_or(
+                                    np.abs(imgSrcPos3dData[:, :, self.iChX]) > 0.0,
+                                    np.abs(imgSrcPos3dData[:, :, self.iChY]) > 0.0,
+                                )
+                                imgMask = np.logical_or(imgMask, np.abs(imgSrcPos3dData[:, :, self.iChZ]) > 0.0)
+                                imgMask = np.logical_and(imgMask, np.abs(imgSrcPos3dData[:, :, self.iChX]) < 9e5)
+
+                                imgTrgValid = np.zeros_like(imgMask)
+                                imgTrgValid[imgMask] = 1.0
+
+                                imgTrgRel = np.subtract(imgSrcPos3dData, aOrig)
+                                imgTrgRad2 = np.sum(np.square(imgTrgRel), axis=2)
+                                imgTrgRad = np.sqrt(imgTrgRad2)
+
+                                imgTrgRad2[~imgMask] = 0.0
+                                imgTrgRad[~imgMask] = 0.0
+
+                                imgTrg[lTrgRoRows, :, 0] += imgTrgRad
+                                imgTrg[lTrgRoRows, :, 1] += imgTrgRad2
+                                imgTrg[lTrgRoRows, :, 2] += imgTrgValid
+
                             else:
                                 raise Exception("Content type '{0}' not supported.".format(sContentType))
                             # endif
@@ -635,7 +770,6 @@ class CConstructRS:
 
                 bIsSingleExp = len(lTrgRsExp) == 1
                 for iRsIdx, xTrgRsExp in enumerate(lTrgRsExp):
-
                     sFilename = sFrameName + ".exr"
                     sFpTrg = os.path.join(lPathTrgMain[iRsIdx], sFilename)
                     if bIsSingleExp is True:
@@ -649,7 +783,7 @@ class CConstructRS:
                     if self.bDoEval:
                         imgTrg = lImgTrg[iRsIdx]
 
-                        if sContentType == "depth":
+                        if sContentType == "depth" or sContentType == "pos3d":
                             imgTrgDepthEval = np.zeros(lTrgImgSize, np.float64)
                             imgTrgDepthValid = imgTrg[:, :, 2] > 0.0
                             # imgTrgDepthValidF = imgTrgDepthValid.astype(np.float)
