@@ -39,7 +39,14 @@ def LoadImageExr(*, sFpImage, bAsUint=False, bNormalize=True):
     imgSrc_f = cv2.imread(
         sFpImage, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH | cv2.IMREAD_UNCHANGED
     )
-    iSrcRows, iSrcCols, iSrcChnl = imgSrc_f.shape
+    if len(imgSrc_f.shape) == 2:
+        iSrcRows, iSrcCols = imgSrc_f.shape
+        iSrcChnl = 1
+    elif len(imgSrc_f.shape) == 3:
+        iSrcRows, iSrcCols, iSrcChnl = imgSrc_f.shape
+    else:
+        raise RuntimeError(f"Invalid shape '{imgSrc_f.shape}' of image: {sFpImage}")
+    # endif
 
     # Prepare image
     aIsNegInf = np.isneginf(imgSrc_f)
