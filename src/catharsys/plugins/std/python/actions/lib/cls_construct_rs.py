@@ -234,12 +234,17 @@ class CConstructRS:
             # endif
             dicImageFolderFo = lImageFolderFo[0]
 
+        # #########################################
+        # Pos3d RS setup
         elif eSrcRndOutType == ERndOutType.POS3D:
             dicImageFolderFo = {
                 "sContentType": "pos3d",
                 "sFolder": "AT_Pos3d_Raw",
                 "sFileExt": ".exr",
             }
+
+        # #########################################
+        # Error case
         else:
             raise RuntimeError(f"Unsupported source render output type '{(str(eSrcRndOutType))}")
         # endif
@@ -298,6 +303,9 @@ class CConstructRS:
         lTrgRsExp: list[CRsExp] = []
         lConstructCfg: list[dict] = []
 
+        # ################################################################################################
+        # Construction type "single"
+        # All lines are combined to achieve the exposure time per line
         if lConstructType[0] == "single":
             dTrgExpPerLine = cathcfg.GetDictValue(
                 dicExposure,
@@ -354,6 +362,12 @@ class CConstructRS:
             )
             sDtiConstruct = "construct-proc/rs/type/single:1"
 
+        # ################################################################################################
+        # Construction type "consecutive"
+        # Lines are combined to simulate a set of exposures per frame.
+        # This can be used to simulate HDR exposures where a set of consecutive exposures,
+        # of increasing time are created. The construction will output one image per exposure time,
+        # which later can be combined in an HDR image by an appropriate algorithm.
         elif lConstructType[0] == "consecutive":
             lTrgExpPerLine = cathcfg.GetDictValue(dicExposure, "lExpPerLine", list, sWhere="exposure configuration")
 
