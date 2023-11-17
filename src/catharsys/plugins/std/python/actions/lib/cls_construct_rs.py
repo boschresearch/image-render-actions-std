@@ -382,7 +382,7 @@ class CConstructRS:
                 dicExposure,
                 "lReadOutLinePattern",
                 list,
-                [0],
+                xDefault=[0],
                 sWhere="exposure configuration",
             )
 
