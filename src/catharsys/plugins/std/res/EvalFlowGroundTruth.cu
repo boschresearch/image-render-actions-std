@@ -345,7 +345,7 @@ __global__ void EvalFlow(const float *aPos1, const float *aPos2, const int *aObj
                         const float fL2 = (fB11 * vC.y - fB12 * vC.x) / fDetB;
                         // It seems we do not always find the best central pixel.
                         // Therefore, fL1+fL2 can be greater than 1. Results look good nonetheless.
-                        if (fL1 >= 0.0 && fL2 >= 0.0) // && (1.0 - fL1 - fL2) >= -1e-4)
+                        if ((fL1 >= 0.0 && fL2 >= 0.0) && (1.0 - fL1 - fL2) >= -1e-4)
                         {
                             vSubPix = fL1 * make_float2(float(piH[i]), float(piV[i])) + fL2 * make_float2(float(piH[iNext]), float(piV[iNext]));
                             // vSubPix = make_float2(fL1, fL2);
