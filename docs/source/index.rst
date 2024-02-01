@@ -32,6 +32,7 @@ Standard Actions
 
    actions-overview
    license
+   back-to-main
 
 .. Indices and tables
 .. ==================
