@@ -31,7 +31,7 @@ import re
 import numpy as np
 import copy
 from pathlib import Path
-
+import warnings
 
 # need to enable OpenExr explicitly
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
@@ -716,6 +716,8 @@ class CConstructLabel:
         imgLIT = np.around(imgLIT * iTotalNormValue)
         # imgLitDebug  = imgLIT.copy()
         imgLIT = np.subtract(imgLIT, 1, where=imgMask)
+        np.nan_to_num(imgLIT, nan=0, posinf=iTotalNormValue-1, neginf=0, copy=False)
+        np.clip(imgLIT, 0, iTotalNormValue - 1, out=imgLIT)
         imgType = np.mod(imgLIT, iLabelTypeCount, where=imgMask).astype(xTrgType)
         imgInst = np.floor_divide(imgLIT, iLabelTypeCount, where=imgMask).astype(xTrgType)
 
